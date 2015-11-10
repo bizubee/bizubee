@@ -1,0 +1,64 @@
+
+const dictionary = new Set([
+    'absolute'
+    'absolve'
+    'abdicate'
+    'insinuate'
+])
+
+createDFA(wordSet) ->
+    const
+    ,   alphabet    = new Set() # set of symbols(characters) comprising the language
+    ,   table       = new Map() # state transition table
+    ,   acceptances = new Map() # to lookup if state is accepting
+
+    # returns new state or null if there is no transition state
+    transformer(state, symbol) ->
+        const transiter = table.get(state)
+        if not transiter.has(symbol)
+            return null
+
+        return transiter.get(symbol)
+    
+    
+    evaluate(string) ->
+        var state = ''
+        for c in string
+            state = transformer(state, c)
+            if state == null
+                return false
+        return acceptances.get(state)
+    
+    
+    for string in wordSet
+        var state = ''
+
+        for c in string
+            var
+            ,   endstates
+            ,   endstate    = state + c
+            
+            if not table.has(state)
+                endstates = new Map()
+                table.set(state, endstates)
+            else
+                endstates = table.get(state)
+                
+            endstates.set(c, endstate)
+            alphabet.add(c)
+            acceptances.set(
+                endstate
+                wordSet.has(endstate)
+            )
+
+            state = endstate
+    
+    return evaluate
+
+
+main(argv) ->
+    const evaluate = createDFA(dictionary)
+    if evaluate(argv[1])
+        console.log('yes')
+    else
+        console.log('no')

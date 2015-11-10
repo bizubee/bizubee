@@ -1,0 +1,44 @@
+
+test('If runs when condition true', (api) -> {
+	var a = 1, b = 2
+	if a == 1 {
+		b = 5
+	}
+
+	api.eq(b, 5)
+	api.done()
+})
+
+test('If does not run when condition false', (api) -> {
+	var a = 1, b = 2
+	if a == 2 {
+		b = 5
+	}
+
+	api.eq(b, 2)
+	api.done()
+})
+
+test('Else runs when condition is false', (api) -> {
+	var a = 1, b = 2
+	if a == 2 {
+		b = 5
+	} else {
+		b = 90
+	}
+
+	api.eq(b, 90)
+	api.done()
+})
+
+test('Else does not run when condition is true', (api) -> {
+	var a = 1, b = 2
+	if a == 1 {
+		b = 5
+	} else {
+		b = 90
+	}
+
+	api.eq(b, 5)
+	api.done()
+})

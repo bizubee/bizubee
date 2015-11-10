@@ -1,0 +1,80 @@
+
+const lib = require('bizubee lib')
+
+var observableFromArray = (arr) -> {
+	var observable = {}
+	observable[lib.symbols.observer] = () -> {
+		var i = 0
+		return {
+			next: () -> {
+				if i < arr.length {
+					i = i + 1
+					return Promise.resolve({
+						value: arr[i - 1]
+						done: false
+					})
+				} else {
+					return Promise.resolve({
+						value: null
+						done: true
+					})
+				}
+			}
+		}
+	}
+
+	return observable
+}
+
+test('For-on basic support', (api) -> ~ {
+	var arr = [], values = [0, 1, 2, 3]
+	for value on observableFromArray(values) do {
+		arr.push(value * 2)
+	}
+	api.arrayEq(arr, [0, 2, 4, 6])
+	api.done()
+})
+
+test('For-on with iterable destructuring', (api) -> ~ {
+	var a = [[2, 4], [3, 5], [4, 2]], arr = []
+	for [a, b] on observableFromArray(a) {
+		arr.push(a * b)
+	}
+
+	api.arrayEq(arr, [8, 15, 8])
+	api.done()
+})
+
+test('For-on with object destructuring', (api) -> ~ {
+	var a = [
+		{a1: 2, a2: 9}
+		{a1: 4, a2: 6}
+		{a1: 2, a2: 1}
+	], arr = []
+
+	for {a1, a2} on observableFromArray(a) {
+		arr.push(a1 * a2)
+	}
+
+	api.arrayEq(arr, [18, 24, 2])
+	api.done()
+})
+
+test('For-on over async generator call', (api) -> ~ {
+	var tilto = () -> ~* {
+		await Promise.resolve(1)
+		yield 44
+		await Promise.resolve(1)
+		yield 99
+		await Promise.resolve(1)
+		yield 22
+	}
+
+	var arr = []
+	for num on tilto() {
+		arr.push(num)
+	}
+
+	api.arrayEq(arr, [44, 99, 22])
+	api.done()
+})

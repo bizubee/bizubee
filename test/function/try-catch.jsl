@@ -1,0 +1,80 @@
+
+
+throwsError() -> {
+    var t = null
+    return t.noprop.noprop
+}
+
+doesntThrowError() -> {
+    return 5
+}
+
+test('Try-Catch statement with error', (api) -> {
+    var error
+    
+    try {
+        throwsError()
+        api.fail()
+    } catch e {
+        error = e
+    }
+    
+    api.isInstance(error, Error)
+    api.done()
+})
+
+test('Try-Catch statement without error', (api) -> {
+    var msg
+    
+    try {
+        doesntThrowError()
+        msg = 'no error'
+    } catch e {
+        msg = e.message
+        api.fail()
+    }
+    
+    api.eq(msg, 'no error')
+    api.done()
+})
+
+test('Try-Finally statement with error', (api) -> {
+    try {
+        throwsError()
+    } finally {
+        api.done()
+    }
+
+    api.fail()    
+})
+
+test('Try-Finally statement without error', (api) -> {
+    try {
+        doesntThrowError()
+    } finally {
+        api.done()
+    }
+
+    api.fail()    
+})
+
+test('Try-Finally statement with error', (api) -> {
+    try {
+        throwsError()
+    } finally {
+        api.done()
+    }
+
+    api.fail()    
+})
+
+test('Try-Catch-Finally without error', (api) -> {
+    try {
+        doesntThrowError()
+    } finally {
+        api.done()
+    }
+
+    api.fail()    
+
+})

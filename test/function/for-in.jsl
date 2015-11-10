@@ -1,0 +1,37 @@
+
+test('For-in through iterable array', (api) -> {
+	var a = [2, 3, 4], b = []
+	for item in a {
+		b.push(item * 2)
+	}
+
+	api.eq(b[0], 4)
+	api.eq(b[1], 6)
+	api.eq(b[2], 8)
+	api.done()
+})
+
+test('For-in with iterable destructuring', (api) -> {
+	var a = [[2, 4], [3, 5], [4, 2]], arr = []
+	for [a, b] in a {
+		arr.push(a * b)
+	}
+
+	api.arrayEq(arr, [8, 15, 8])
+	api.done()
+})
+
+test('For-in with object destructuring', (api) -> {
+	var a = [
+		{a1: 2, a2: 9}
+		{a1: 4, a2: 6}
+		{a1: 2, a2: 1}
+	], arr = []
+
+	for {a1, a2} in a {
+		arr.push(a1 * a2)
+	}
+
+	api.arrayEq(arr, [18, 24, 2])
+	api.done()
+})

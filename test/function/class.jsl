@@ -1,0 +1,26 @@
+
+test('Simple class with property', (api) -> {
+    class tester {
+        constructor() ->
+            @prop = 5
+    }
+    
+    var meth = new tester()
+    api.eq(meth.prop, 5)
+    api.done()
+})
+
+test('Simple class', (api) -> {
+    class tester {
+        constructor() ->
+            @prop = 5
+            
+        double() ->
+            return @prop * 2
+    }
+    
+    var meth = new tester()
+    api.eq(meth.prop, 5)
+    api.eq(meth.double(), 10)
+    api.done()
+})

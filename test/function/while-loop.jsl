@@ -1,0 +1,10 @@
+
+test('Basic while loop support', (api) -> {
+	var arr = []
+	while arr.length < 3 {
+		arr.push(arr.length * 2)
+	}
+
+	api.arrayEq(arr, [0, 2, 4])
+	api.done()
+})

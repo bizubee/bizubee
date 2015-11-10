@@ -1,0 +1,9 @@
+
+test('Basic generator function declaration', (api) -> {
+    var gen = () -> * {
+        yield 4
+        yield 5
+    }
+    
+    api.done()
+})

@@ -1,0 +1,26 @@
+
+
+test('basic single comparison', (api) -> {
+    var
+    ,   a = 1
+    ,   b = 20
+
+    api.assert(a < b)
+    api.done()
+})
+
+# test comparison chains, a.k.a  0 < a < b() < 10
+test('double comparison with function call', (api) -> {
+    var
+    ,   a = 1
+    ,   b = 20
+    ,   c = 5
+    
+    fn() ->
+        return c then c = 90
+    
+    # tests to make sure fn() is only evaluated once
+    api.assert(a < fn() < b)
+    api.done()
+})
+

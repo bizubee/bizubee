@@ -1,0 +1,52 @@
+
+test('Async-generator basic functionality', (api) -> {
+	var agen = (param) -> ~* {
+		await Promise.resolve(1)
+		yield 3
+		await Promise.resolve(param)
+		yield 4
+		return 9
+	}
+
+	var ai = agen(2)
+	ai.next().then((o) -> {
+		api.eq(o.value, 3)
+		api.eq(o.done, false)
+		return ai.next()
+	}).then((o) -> {
+		api.eq(o.value, 4)
+		api.eq(o.done, false)
+		return ai.next()
+	}).then((o) -> {
+		api.eq(o.value, 9)
+		api.eq(o.done, true)
+		api.done()
+	})
+})
+
+test('Async-generator next input values', (api) -> {
+	var agen = (param) -> ~* {
+		await Promise.resolve(1)
+		var a = yield 3
+		api.eq(a, 8)
+		await Promise.resolve(1)
+		var b = yield 4
+		api.eq(b, 5)
+		return 9
+	}
+
+	var ai = agen()
+	ai.next().then((o) -> {
+		api.eq(o.value, 3)
+		api.eq(o.done, false)
+		return ai.next(8)
+	}).then((o) -> {
+		api.eq(o.value, 4)
+		api.eq(o.done, false)
+		return ai.next(5)
+	}).then((o) -> {
+		api.eq(o.value, 9)
+		api.eq(o.done, true)
+		api.done()
+	})
+})
