@@ -9,7 +9,7 @@ test('Function with no parameters', (api) -> {
 })
 
 test('Function with splatt parameter', (api) -> {
-	var fn = (..args) -> {
+	var fn = (...args) -> {
 		return args[0] + args[1] + args[2]
 	}
 
@@ -89,4 +89,28 @@ test('Function with default array destructuring', (api) -> {
 	api.eq(fn(2), 6)
 	api.eq(fn(5, [2, 3]), 7)
 	api.done()
+})
+
+test('Function declaration basic functionality', (api) -> {
+	fn() -> {
+		var a = 3
+		return a ^ a
+	}
+	
+	api.eq(fn(), 27)
+	api.done()
+})
+
+test('Function declaration bubbles to top of scope', (api) -> {
+	try
+		var b = fn()
+		api.eq(b, 4)
+		api.done()
+	catch e
+		api.fail()
+	
+	fn() -> {
+		var a = 2
+		return a ^ a
+	}
 })

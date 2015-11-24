@@ -40,12 +40,13 @@ function control(tokens, parameters) {
 			if (next.done) {
 				return null;
 			} else {
-				let position 	= next.value.getPosition();
-			    this.yytext 	= next.value.value;
+				let token		= next.value;
+				let position 	= token.getPosition();
+				this.yytext 	= token;
 			    this.yyloc 		= position;
 			    this.yylloc 	= position;
 			    this.yylineno 	= position.first_line;
-				return next.value.tag;
+				return token.tag;
 			}
 		},
 		setInput: function(tokens, csrc, file) {
@@ -88,7 +89,7 @@ exports.parseCharSrc = function(csrc, parameters) {
 
 
 exports.parseRawTokens = function(tokens, parameters) {
-	let gen = lexer.refineTokens(tokens);
+	let gen = lexer.refineTokens(tokens[Symbol.iterator]());
 	return control(gen, parameters);
 }
 

@@ -1,0 +1,34 @@
+
+export range(start, end, step = 1) -> * {
+	while start != end
+		yield start
+		start += step
+}
+
+export tuple(...args) -> {
+	Object.freeze(args)
+	return args
+}
+
+export zip(...args) -> * {
+	const len = args.length
+	while true
+		const vals = new Array(len)
+		var i = 0
+		while i < len
+			const ctrl = args[i]
+			if ctrl.done
+				return
+			else
+				vals[i] = ctrl.value
+			i += 1
+
+		Object.freeze(vals)
+
+		yield vals
+}
+
+export cat(...args) -> * {
+	for iter in args
+		yield* iter[Symbol.iterator]()
+}

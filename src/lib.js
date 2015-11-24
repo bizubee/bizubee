@@ -5,6 +5,7 @@ const fs 	    = require('fs');
 const vm        = require('vm');
 const path 	    = require('path');
 const parser   	= require('./parser');
+const support	= require('./fragments/lib');
 const Module	= require('module');
 const cache 	= new Map();
 
@@ -13,20 +14,28 @@ const ext = 'jsl';
 
 exports.extension = ext;
 
+// bastardized version of require that works directly with bizubee files
+support.require = function(dirpath, file) {
+	let abspath = path.resolve(`${dirpath}/${file}`);	// absolute path
+
+	if (cache.has(abspath)) {
+		return cache.get(abspath);
+	}
+
+    let ctx = runFileInNewContext(abspath);
+    cache.set(abspath, ctx.module.exports);
+    
+    return ctx.module.exports;
+}
+
+support.module = function() {
+	return {};
+}
+
 function utilWarn(name) {
 	console.warn(
 		`Global utility function '${name}' has already been defined!`
 		);
-}
-
-if (global.keys === undefined) {
-	global.keys = function*(obj) {
-		for (var key in obj) {
-			yield key;
-		}
-	}
-} else {
-	utilWarn('keys');
 }
 
 const symbols = {};
@@ -34,113 +43,6 @@ symbols.export = Symbol('Export Symbol');
 symbols.observer = Symbol('Observer Symbol');
 exports.symbols = symbols;
 
-// Thanks Anatoly Ressin (Artazor) for letting me steal your code!
-exports.async = function (fn) {
-	return function () {
-		var gen = fn.apply(this, arguments);
-		try {
-			return resolved();
-		} catch (e) {
-			return Promise.reject(e);
-		}
-		function resolved(res) { return next(gen.next(res)); }
-		function rejected(err) { return next(gen.throw(err)); }
-		function next(ret) {
-			var val = ret.value;
-			if (ret.done) {
-				return Promise.resolve(val);
-			} else try {
-				return val.then(resolved, rejected);
-			} catch (_) {
-				throw new Error('Expected Promise/A+');
-			}
-		}
-	}
-}
-
-exports.getObservableCtrl = function() {
-	let first = true, promises = [];
-	let onsend, onsendfail;
-	let onnext, onnextfail;
-	let done = function(value) {
-		onsend({
-			done: true,
-			value: value
-		});
-	};
-	let observable = {
-		[symbols.observer] () {
-			return observable;
-		},
-		next(value) {
-			if (first) {
-				if (value !== undefined)
-					throw new Error('First sent value must not exist!');
-
-				let p = new Promise(function(win, fail) {
-					onsend = win;
-					onsendfail = fail;
-				});
-
-				first = false;
-				api.code().then(done);
-
-				return p;
-			} else {
-				let p = new Promise(function(win, fail) {
-					onsend = win;
-					onsendfail = fail;
-				});
-
-				onnext(value);
-
-				return p;
-			}
-		}
-	};
-
-	let api = {
-		send(value) {
-			onsend({
-				value: value,
-				done: false
-			});
-
-			let npromise = new Promise(function(win, fail) {
-				onnext = win;
-				onnextfail = fail;
-			});
-
-			return npromise;
-		},
-		observable: observable
-	};
-
-	return api;
-}
-
-exports.rest = function(iter) {
-	let array = [];
-	for (let val of iter) {
-		array.push(val);
-	}
-	return array;
-}
-
-exports.restargs = function(args, index) {
-	let arr = [];
-	for (let i = index; i < args.length; i++) {
-		arr.push(args[i]);
-	}
-
-	return arr;
-}
-
-exports.iter = function*(al) {
-	for (var i = 0; i < al.length; i++) {
-		yield al[i];
-	}
-}
 
 function createContext(filename, ctxt) {
     let ctx = ctxt || {};
@@ -181,7 +83,7 @@ function createContext(filename, ctxt) {
 	    ctx.require = function(mod) {
 		    if (mod === 'bizubee lib') {
 		    	
-		        return exports;
+		        return support;
 		    }
 
 		    return mdl.require(mod);
@@ -236,35 +138,5 @@ function runFileInNewContext(filepath, ctxt) {
 
 exports.runFileInNewContext = runFileInNewContext;
 
-// bastardized version of require that works directly with bizubee files
-exports.require = function(dirpath, file) {
-	let abspath = path.resolve(`${dirpath}/${file}`);	// absolute path
 
-	if (cache.has(abspath)) {
-		return cache.get(abspath);
-	}
 
-    let ctx = runFileInNewContext(abspath);
-    cache.set(abspath, ctx.module.exports);
-    
-    return ctx.module.exports;
-}
-
-// this is used when utilizing and sequences
-exports.last = function() {
-	if (arguments.length === 0)
-		return;
-	
-	return arguments[arguments.length - 1];
-}
-
-exports.concat = function(args) {
-	let argv = [];
-	for (let i = 0; i < args.length; i++) {
-		for (let arg of args[i]) {
-			argv.push(arg);
-		}
-	}
-	
-	return argv;
-}

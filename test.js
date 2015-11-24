@@ -20,6 +20,8 @@ const pad = function(str, len) {
 	}
 }
 
+const PADDING = 60;
+
 const FUN_DIR = `test/function`;
 
 let CURRENT_CODE;
@@ -141,26 +143,36 @@ co(function*(){
 	let i = 0, passed = 0, failed = 0;
 	console.log(`failed (${cc.red('*')}), passed (${cc.green('*')}):\n`)
 
-	console.log(`test   ${pad("", 50)}\tresult`)
+	console.log(`test   ${pad("", PADDING)}\tresult`)
 	console.log()
 	while (true) {
 		const ctrl = yield pipeline.next();
+		if (ctrl.done)
+			break;
+		
 		const test = ctrl.value;
 		
 		try {
 			let res = yield test.promise;
 
-			console.log(`${pad(i + 1, 5)}: ${pad(test.title, 50)}\t${cc.green('*')}`);
+			console.log(`${pad(i + 1, 5)}: ${pad(test.title, PADDING)}\t${cc.green('*')}`);
 
 			passed++;
 		} catch (res) {
 
-			console.log(`${pad(i + 1, 5)}: ${pad(test.title, 50)}\t${cc.red('*')}`);
+			console.log(`${pad(i + 1, 5)}: ${pad(test.title, PADDING)}\t${cc.red('*')}`);
 
 			failed++;
 		}
 
 		i++;
+	}
+	
+	console.log();
+	if (passed === i) {
+		console.log(`Passed all ${i} tests, congratulations!!!`)
+	} else {
+		console.log(`Failed ${failed} of ${i} tests, sorry! :(`)
 	}
 });
 

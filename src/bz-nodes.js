@@ -43,6 +43,8 @@ var OKEY = Symbol('Options key');
 
 var IGNORE = Symbol('Ingorable properties');
 
+var EMPTY = new js.EmptyStatement();
+
 var binaryOperator = new Set(["==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "//", "%", "^", "&", "has", "is"]);
 
 var logicalOperator = new Set(["or", "and"]);
@@ -63,6 +65,14 @@ var convert = {
     'IS': 'instanceof',
 
     '&': '+'
+};
+
+var stringEscapeTable = {
+    'n': '\n',
+    'r': '\r',
+    't': '\t',
+    'b': '\b',
+    'f': '\f'
 };
 
 var PATH_MAP = new Map();
@@ -112,6 +122,7 @@ function defined(val) {
     return val !== undefined && val !== null;
 }
 
+// keeps track of underscoring necessary for util vars to avoid collisions
 function knowIdLead(name) {
     var i = 0;
     while (i < name.length) {
@@ -129,6 +140,7 @@ function last(jsargs) {
     return getJSMethodCall([LIB, 'last'], jsargs);
 }
 
+// returns new variable name that won't conflict with existing vars in AST
 function nuVar() {
     var txt = arguments.length <= 0 || arguments[0] === undefined ? 'bzbVar' : arguments[0];
 
@@ -336,19 +348,19 @@ function statement(jsExpr) {
 }
 
 // returns
-function getJSConditional(_x42, _x43) {
+function getJSConditional(_x43, _x44) {
     var _again = true;
 
     _function: while (_again) {
-        var identifier = _x42,
-            def = _x43;
+        var identifier = _x43,
+            def = _x44;
         _again = false;
 
         if (identifier instanceof js.Identifier) {
             return new js.ConditionalExpression(new js.BinaryExpression('===', identifier, new js.Identifier('undefined')), def, identifier);
         } else if (typeof identifier === 'string') {
-            _x42 = new js.Identifier(identifier);
-            _x43 = def;
+            _x43 = new js.Identifier(identifier);
+            _x44 = def;
             _again = true;
             continue _function;
         } else {
@@ -374,6 +386,7 @@ class Node {
         this[IGNORE] = new Set();
         this.type = this.constructor.name;
         this.loc = null;
+        this.compiled = false;
         nodeQueue.eat(this);
     }
 
@@ -445,8 +458,18 @@ class Node {
         return this;
     }
 
+    toJS(o) {
+        if (this.compiled) {
+            this.error('Cannot recompile ' + this.constructor.name + ' node!');
+            throw new Error('Cannot compile node more than once!');
+        } else {
+            this.compiled = true;
+            return this._toJS(o);
+        }
+    }
+
     // make sure this method is implemented for all node subclasses
-    toJS() {
+    _toJS(o) {
         this.error('Method "toJS" not implemented!');
     }
 
@@ -585,6 +608,7 @@ class Scope extends Node {
 
         this.body = statements;
         this._opvars = [];
+        this._funcDeclarations = new Map();
     }
 
     getOpvars(n) {
@@ -593,15 +617,51 @@ class Scope extends Node {
         for (var _i = 0; _i < n; _i++) {
             if (this._opvars.length === _i) this._opvars.push(nuVar('op'));
 
-            arr[_i] = new js.Identifier(this._opvars[_i]);
+            arr[_i] = this._opvars[_i];
         }
 
         return arr;
     }
 
     getOpvarsDeclaration() {
-        var identifiers = this.getOpvars(this._opvars.length);
+        var identifiers = this.getOpvars(this._opvars.length).map(function (id) {
+            return new js.Identifier(id);
+        });
         return new js.VariableDeclaration(identifiers, 'let');
+    }
+
+    getFunctionDeclarations() {
+        var declarators = [];
+        var _iteratorNormalCompletion5 = true;
+        var _didIteratorError5 = false;
+        var _iteratorError5 = undefined;
+
+        try {
+            for (var _iterator5 = this._funcDeclarations[Symbol.iterator](), _step5; !(_iteratorNormalCompletion5 = (_step5 = _iterator5.next()).done); _iteratorNormalCompletion5 = true) {
+                var _step5$value = _slicedToArray(_step5.value, 2);
+
+                var name = _step5$value[0];
+                var func = _step5$value[1];
+
+                var declarator = new js.VariableDeclarator(new js.Identifier(name), func);
+                declarators.push(declarator);
+            }
+        } catch (err) {
+            _didIteratorError5 = true;
+            _iteratorError5 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion5 && _iterator5['return']) {
+                    _iterator5['return']();
+                }
+            } finally {
+                if (_didIteratorError5) {
+                    throw _iteratorError5;
+                }
+            }
+        }
+
+        return new js.VariableDeclaration(declarators, 'const');
     }
 
     [Symbol.iterator]() {
@@ -626,37 +686,58 @@ class Scope extends Node {
     }
 
     *getJSLines(o) {
-        var _iteratorNormalCompletion5 = true;
-        var _didIteratorError5 = false;
-        var _iteratorError5 = undefined;
+        var _iteratorNormalCompletion6 = true;
+        var _didIteratorError6 = false;
+        var _iteratorError6 = undefined;
 
         try {
-            for (var _iterator5 = this.body[Symbol.iterator](), _step5; !(_iteratorNormalCompletion5 = (_step5 = _iterator5.next()).done); _iteratorNormalCompletion5 = true) {
-                var line = _step5.value;
+
+            for (var _iterator6 = this.body[Symbol.iterator](), _step6; !(_iteratorNormalCompletion6 = (_step6 = _iterator6.next()).done); _iteratorNormalCompletion6 = true) {
+                var line = _step6.value;
+
+                // if line is a function declaration we compile the function
+                // then save it in a map to be put later in a const declaration at top of
+                // scope, cause all function declarations are 'bubbled' to the top of their scope
+
+                if (line instanceof FunctionDeclaration) {
+
+                    var _name = line.identifier.name;
+
+                    if (this._funcDeclarations.has(_name)) {
+                        line.error('Cannot declare function more than once!');
+                    }
+
+                    this._funcDeclarations.set(_name, line.func.toJS(o));
+
+                    continue;
+                }
 
                 var nodes = line.toJS(o);
                 if (nodes instanceof Array) {
-                    var _iteratorNormalCompletion6 = true;
-                    var _didIteratorError6 = false;
-                    var _iteratorError6 = undefined;
+                    // if the js compilation is a serialisation (array) of nodes
+                    // we must yield each node of the serialization individually
+
+                    var _iteratorNormalCompletion7 = true;
+                    var _didIteratorError7 = false;
+                    var _iteratorError7 = undefined;
 
                     try {
-                        for (var _iterator6 = nodes[Symbol.iterator](), _step6; !(_iteratorNormalCompletion6 = (_step6 = _iterator6.next()).done); _iteratorNormalCompletion6 = true) {
-                            var subline = _step6.value;
+                        for (var _iterator7 = nodes[Symbol.iterator](), _step7; !(_iteratorNormalCompletion7 = (_step7 = _iterator7.next()).done); _iteratorNormalCompletion7 = true) {
+                            var subline = _step7.value;
 
                             yield statement(subline);
                         }
                     } catch (err) {
-                        _didIteratorError6 = true;
-                        _iteratorError6 = err;
+                        _didIteratorError7 = true;
+                        _iteratorError7 = err;
                     } finally {
                         try {
-                            if (!_iteratorNormalCompletion6 && _iterator6['return']) {
-                                _iterator6['return']();
+                            if (!_iteratorNormalCompletion7 && _iterator7['return']) {
+                                _iterator7['return']();
                             }
                         } finally {
-                            if (_didIteratorError6) {
-                                throw _iteratorError6;
+                            if (_didIteratorError7) {
+                                throw _iteratorError7;
                             }
                         }
                     }
@@ -667,16 +748,16 @@ class Scope extends Node {
                 }
             }
         } catch (err) {
-            _didIteratorError5 = true;
-            _iteratorError5 = err;
+            _didIteratorError6 = true;
+            _iteratorError6 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion5 && _iterator5['return']) {
-                    _iterator5['return']();
+                if (!_iteratorNormalCompletion6 && _iterator6['return']) {
+                    _iterator6['return']();
                 }
             } finally {
-                if (_didIteratorError5) {
-                    throw _iteratorError5;
+                if (_didIteratorError6) {
+                    throw _iteratorError6;
                 }
             }
         }
@@ -706,13 +787,13 @@ class Program extends Scope {
         var cache = arguments.length <= 1 || arguments[1] === undefined ? new Set() : arguments[1];
 
         var parser = require('./parser');
-        var _iteratorNormalCompletion7 = true;
-        var _didIteratorError7 = false;
-        var _iteratorError7 = undefined;
+        var _iteratorNormalCompletion8 = true;
+        var _didIteratorError8 = false;
+        var _iteratorError8 = undefined;
 
         try {
-            for (var _iterator7 = this.body[Symbol.iterator](), _step7; !(_iteratorNormalCompletion7 = (_step7 = _iterator7.next()).done); _iteratorNormalCompletion7 = true) {
-                var statement = _step7.value;
+            for (var _iterator8 = this.body[Symbol.iterator](), _step8; !(_iteratorNormalCompletion8 = (_step8 = _iterator8.next()).done); _iteratorNormalCompletion8 = true) {
+                var statement = _step8.value;
 
                 if (statement instanceof ImportStatement) {
                     var abspath = _path2['default'].resolve(dir, statement.path) + '.' + ext;
@@ -724,48 +805,6 @@ class Program extends Scope {
                     yield* ctrl.tree.getImports(ndir, cache);
                     yield [abspath, ctrl.tree];
                 }
-            }
-        } catch (err) {
-            _didIteratorError7 = true;
-            _iteratorError7 = err;
-        } finally {
-            try {
-                if (!_iteratorNormalCompletion7 && _iterator7['return']) {
-                    _iterator7['return']();
-                }
-            } finally {
-                if (_didIteratorError7) {
-                    throw _iteratorError7;
-                }
-            }
-        }
-    }
-
-    compileBrowser(o) {
-        // recursively resolve libraries
-
-        // set var LIB to support lib at top
-        // set LIB.modules to a map (key -> function)
-        // run root program in sub-scope
-
-        var modmap = new Map();
-        var cache = new Set();
-        var modules = [];
-        var directives = [statement(new js.Literal('use strict')), this.getOpvarsDeclaration()];
-
-        var _iteratorNormalCompletion8 = true;
-        var _didIteratorError8 = false;
-        var _iteratorError8 = undefined;
-
-        try {
-            for (var _iterator8 = this.getImports(_path2['default'].dirname(this.filename), cache)[Symbol.iterator](), _step8; !(_iteratorNormalCompletion8 = (_step8 = _iterator8.next()).done); _iteratorNormalCompletion8 = true) {
-                var _step8$value = _slicedToArray(_step8.value, 2);
-
-                var abspath = _step8$value[0];
-                var program = _step8$value[1];
-
-                var hash = getLibn(abspath);
-                modmap.set(hash, program);
             }
         } catch (err) {
             _didIteratorError8 = true;
@@ -781,24 +820,34 @@ class Program extends Scope {
                 }
             }
         }
+    }
 
-        EXP = nuVar('exports');
-        LIB = nuVar('bzbSupportLib');
+    compileBrowser(o) {
+        // recursively resolve libraries
 
-        directives.push(getJSDeclare(new js.Identifier(LIB), acorn.parseExpressionAt(_fs2['default'].readFileSync('src/fragments/lib.js', 'utf8'), 0, { ecmaVersion: 6 }), 'const'));
+        // set var LIB to support lib at top
+        // set LIB.modules to a map (key -> function)
+        // run root program in sub-scope
+
+        var modmap = new Map();
+        var cache = new Set();
+        var modules = [];
+        var instructions = [statement(new js.Literal('use strict'))];
+        var directives = [];
 
         var _iteratorNormalCompletion9 = true;
         var _didIteratorError9 = false;
         var _iteratorError9 = undefined;
 
         try {
-            for (var _iterator9 = modmap[Symbol.iterator](), _step9; !(_iteratorNormalCompletion9 = (_step9 = _iterator9.next()).done); _iteratorNormalCompletion9 = true) {
+            for (var _iterator9 = this.getImports(_path2['default'].dirname(this.filename), cache)[Symbol.iterator](), _step9; !(_iteratorNormalCompletion9 = (_step9 = _iterator9.next()).done); _iteratorNormalCompletion9 = true) {
                 var _step9$value = _slicedToArray(_step9.value, 2);
 
-                var key = _step9$value[0];
-                var mod = _step9$value[1];
+                var abspath = _step9$value[0];
+                var program = _step9$value[1];
 
-                modules.push(new js.Property(new js.Literal('' + key), mod.toJS(o)));
+                var hash = getLibn(abspath);
+                modmap.set(hash, program);
             }
         } catch (err) {
             _didIteratorError9 = true;
@@ -815,17 +864,23 @@ class Program extends Scope {
             }
         }
 
-        directives.push(statement(getJSMethodCall([LIB, 'setModules'], [new js.ObjectExpression(modules)])));
+        EXP = nuVar('exports');
+        LIB = nuVar('bzbSupportLib');
+
+        instructions.push(getJSDeclare(new js.Identifier(LIB), acorn.parseExpressionAt(_fs2['default'].readFileSync(__dirname + '/fragments/lib.js', 'utf8'), 0, { ecmaVersion: 6 }), 'const'));
 
         var _iteratorNormalCompletion10 = true;
         var _didIteratorError10 = false;
         var _iteratorError10 = undefined;
 
         try {
-            for (var _iterator10 = this.getJSLines(o)[Symbol.iterator](), _step10; !(_iteratorNormalCompletion10 = (_step10 = _iterator10.next()).done); _iteratorNormalCompletion10 = true) {
-                var jsline = _step10.value;
+            for (var _iterator10 = modmap[Symbol.iterator](), _step10; !(_iteratorNormalCompletion10 = (_step10 = _iterator10.next()).done); _iteratorNormalCompletion10 = true) {
+                var _step10$value = _slicedToArray(_step10.value, 2);
 
-                directives.push(jsline);
+                var key = _step10$value[0];
+                var mod = _step10$value[1];
+
+                modules.push(new js.Property(new js.Literal('' + key), mod.toJS(o)));
             }
         } catch (err) {
             _didIteratorError10 = true;
@@ -842,13 +897,7 @@ class Program extends Scope {
             }
         }
 
-        if (this._opvars.length === 0) directives[1] = new js.EmptyStatement();
-
-        return new js.BlockStatement(directives);
-    }
-
-    compileBrowserModule(o) {
-        var instructions = statement([this.getOpvarsDeclaration()]);
+        instructions.push(statement(getJSMethodCall([LIB, 'setModules'], [new js.ObjectExpression(modules)])));
 
         var _iteratorNormalCompletion11 = true;
         var _didIteratorError11 = false;
@@ -858,7 +907,7 @@ class Program extends Scope {
             for (var _iterator11 = this.getJSLines(o)[Symbol.iterator](), _step11; !(_iteratorNormalCompletion11 = (_step11 = _iterator11.next()).done); _iteratorNormalCompletion11 = true) {
                 var jsline = _step11.value;
 
-                instructions.push(jsline);
+                directives.push(jsline);
             }
         } catch (err) {
             _didIteratorError11 = true;
@@ -875,15 +924,14 @@ class Program extends Scope {
             }
         }
 
-        if (this._opvars.length === 0) instructions.shift();
+        if (this._funcDeclarations.size > 0) directives.unshift(this.getFunctionDeclarations());
+        if (this._opvars.length > 0) directives.unshift(this.getOpvarsDeclaration());
 
-        return new js.FunctionExpression(null, [new js.Identifier(EXP)], new js.BlockStatement(instructions));
+        return new js.BlockStatement([].concat(instructions, [new js.BlockStatement(directives)]));
     }
 
-    runtimeCompile(o) {
-        LIB = nuVar('bzbSupportLib');
-        EXP = nuVar('moduleExports');
-        var instructions = statement([new js.Literal("use strict"), this.getOpvarsDeclaration(), getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal('bizubee lib')]), 'const'), getJSDeclare(new js.Identifier(EXP, false), getJSMethodCall([LIB, 'module'], []))]) || o.instructions;
+    compileBrowserModule(o) {
+        var instructions = [];
 
         var _iteratorNormalCompletion12 = true;
         var _didIteratorError12 = false;
@@ -910,16 +958,53 @@ class Program extends Scope {
             }
         }
 
+        if (this._funcDeclarations.size > 0) instructions.unshift(this.getFunctionDeclarations());
+        if (this._opvars.length > 0) instructions.unshift(this.getOpvarsDeclaration());
+
+        return new js.FunctionExpression(null, [new js.Identifier(EXP)], new js.BlockStatement(instructions));
+    }
+
+    runtimeCompile(o) {
+        LIB = nuVar('bzbSupportLib');
+        EXP = nuVar('moduleExports');
+        var instructions = statement([new js.Literal("use strict"), getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal('bizubee lib')]), 'const'), getJSDeclare(new js.Identifier(EXP, false), getJSMethodCall([LIB, 'module'], [])), EMPTY, EMPTY]) || o.instructions;
+
+        var _iteratorNormalCompletion13 = true;
+        var _didIteratorError13 = false;
+        var _iteratorError13 = undefined;
+
+        try {
+            for (var _iterator13 = this.getJSLines(o)[Symbol.iterator](), _step13; !(_iteratorNormalCompletion13 = (_step13 = _iterator13.next()).done); _iteratorNormalCompletion13 = true) {
+                var jsline = _step13.value;
+
+                instructions.push(jsline);
+            }
+        } catch (err) {
+            _didIteratorError13 = true;
+            _iteratorError13 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion13 && _iterator13['return']) {
+                    _iterator13['return']();
+                }
+            } finally {
+                if (_didIteratorError13) {
+                    throw _iteratorError13;
+                }
+            }
+        }
+
         instructions.append(statement([new js.AssignmentExpression('=', getJSMemberExpression(['module', 'exports']), new js.Identifier(EXP))]));
 
         instructions.append(statement(new js.AssignmentExpression('=', getJSMemberExpression(['global', 'main']), new js.Identifier('main'))));
 
-        if (this._opvars.length === 0) instructions[1] = new js.EmptyStatement();
+        if (this._opvars.length > 0) instructions[3] = this.getOpvarsDeclaration();
+        if (this._funcDeclarations.size > 0) instructions[4] = this.getFunctionDeclarations();
 
         return new js.Program(instructions);
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.parameters.browser) {
             if (this.parameters.browser.root) {
                 return this.compileBrowser(o);
@@ -947,65 +1032,34 @@ class Statement extends Node {}
 exports.Statement = Statement;
 
 class BlockStatement extends Scope {
-    toJS(o) {
+    _toJS(o) {
         var instructions = [] || o.instructions;
-        var _iteratorNormalCompletion13 = true;
-        var _didIteratorError13 = false;
-        var _iteratorError13 = undefined;
+        var _iteratorNormalCompletion14 = true;
+        var _didIteratorError14 = false;
+        var _iteratorError14 = undefined;
 
         try {
-            for (var _iterator13 = this.body[Symbol.iterator](), _step13; !(_iteratorNormalCompletion13 = (_step13 = _iterator13.next()).done); _iteratorNormalCompletion13 = true) {
-                var line = _step13.value;
+            for (var _iterator14 = this.getJSLines(o)[Symbol.iterator](), _step14; !(_iteratorNormalCompletion14 = (_step14 = _iterator14.next()).done); _iteratorNormalCompletion14 = true) {
+                var line = _step14.value;
 
-                var nodes = line.toJS(o);
-                if (nodes instanceof Array) {
-                    var _iteratorNormalCompletion14 = true;
-                    var _didIteratorError14 = false;
-                    var _iteratorError14 = undefined;
-
-                    try {
-                        for (var _iterator14 = nodes[Symbol.iterator](), _step14; !(_iteratorNormalCompletion14 = (_step14 = _iterator14.next()).done); _iteratorNormalCompletion14 = true) {
-                            var subline = _step14.value;
-
-                            instructions.push(subline);
-                        }
-                    } catch (err) {
-                        _didIteratorError14 = true;
-                        _iteratorError14 = err;
-                    } finally {
-                        try {
-                            if (!_iteratorNormalCompletion14 && _iterator14['return']) {
-                                _iterator14['return']();
-                            }
-                        } finally {
-                            if (_didIteratorError14) {
-                                throw _iteratorError14;
-                            }
-                        }
-                    }
-                } else if (nodes instanceof js.Node) {
-                    if (nodes instanceof js.Expression) {
-                        instructions.push(statement(nodes));
-                    } else instructions.push(nodes);
-                } else {
-                    this.error('Invalid object ' + typeof nodes + '!');
-                }
+                if (line instanceof js.Expression) instructions.push(statement(line));else instructions.push(line);
             }
         } catch (err) {
-            _didIteratorError13 = true;
-            _iteratorError13 = err;
+            _didIteratorError14 = true;
+            _iteratorError14 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion13 && _iterator13['return']) {
-                    _iterator13['return']();
+                if (!_iteratorNormalCompletion14 && _iterator14['return']) {
+                    _iterator14['return']();
                 }
             } finally {
-                if (_didIteratorError13) {
-                    throw _iteratorError13;
+                if (_didIteratorError14) {
+                    throw _iteratorError14;
                 }
             }
         }
 
+        if (this._funcDeclarations.size > 0) instructions.unshift(this.getFunctionDeclarations());
         if (this._opvars.length > 0) instructions.unshift(this.getOpvarsDeclaration());
 
         return new js.BlockStatement(instructions);
@@ -1022,7 +1076,7 @@ class ExpressionStatement extends Statement {
         this.expression = expression;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.ExpressionStatement(this.expression.toJS(o));
     }
 }
@@ -1042,7 +1096,7 @@ class IfStatement extends Statement {
         this.alternate = alternate;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var test = this.test.toJS(o);
         var consequent = this.consequent.toJS(o);
         var alternate = null;
@@ -1072,7 +1126,7 @@ class BreakStatement extends Statement {
         this.label = label;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.BreakStatement();
     }
 }
@@ -1089,7 +1143,7 @@ class ContinueStatement extends Statement {
         this.label = label;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.ContinueStatement();
     }
 }
@@ -1119,7 +1173,7 @@ class ReturnStatement extends Statement {
         this.after = after;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (defined(this.after)) {
             if (this.after instanceof ReturnStatement) this.after.error('Cannot return from function multiple times!');
 
@@ -1146,7 +1200,7 @@ class ThrowStatement extends Statement {
         this.argument = argument;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.ThrowStatement(this.argument.toJS(o));
     }
 }
@@ -1166,7 +1220,7 @@ class TryStatement extends Statement {
         this.finalizer = finalizer;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var handler = defined(this.handler) ? this.handler.toJS(o) : null;
         var finalizer = defined(this.finalizer) ? this.finalizer.toJS(o) : null;
         return new js.TryStatement(this.block.toJS(o), handler, finalizer);
@@ -1184,7 +1238,7 @@ class WhileStatement extends Statement {
         this.body = body;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var test = this.test.toJS(o);
         var body = this.body.toJS(o);
 
@@ -1207,7 +1261,7 @@ class ForStatement extends Statement {
         this.async = async;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.async) return this.asyncToJS(o);else return this.syncToJS(o);
     }
 
@@ -1322,7 +1376,7 @@ class VariableDeclaration extends Declaration {
         }
     }
 
-    toJS(o) {
+    _toJS(o) {
         var jsvars = [];
         var type = this.constant ? 'const' : 'let';
 
@@ -1377,13 +1431,15 @@ class VariableDeclarator extends Node {
         this.init = init;
     }
 
-    toJS(o) {
+    _toJS(o) {
+        // always return an array
+
         var init = !!this.init ? this.init.toJS(o) : null;
         if (this.id instanceof Pattern) {
             if (init === null) this.id.error('All pattern declarations must be initialized!');
 
             var nuvar = nuVar('patternPlaceholder');
-            var arr = [new js.VariableDeclarator(new js.Identifier(nuvar), this.init.toJS(o))];
+            var arr = [new js.VariableDeclarator(new js.Identifier(nuvar), init)];
 
             var _iteratorNormalCompletion18 = true;
             var _didIteratorError18 = false;
@@ -1430,7 +1486,7 @@ class Expression extends Node {
 exports.Expression = Expression;
 
 class ThisExpression extends Expression {
-    toJS(o) {
+    _toJS(o) {
         return new js.ThisExpression();
     }
 }
@@ -1440,15 +1496,16 @@ exports.ThisExpression = ThisExpression;
 class YieldExpression extends Expression {
     constructor() {
         var argument = arguments.length <= 0 || arguments[0] === undefined ? null : arguments[0];
+        var delegate = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
 
         super(argument);
         setParent(argument, this);
 
-        this._ctrl = null;
         this.argument = argument;
+        this.delegate = delegate;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var inyield = undefined,
             pfunc = this.getParentFunction();
         if (pfunc === null || !pfunc.generator) {
@@ -1458,10 +1515,10 @@ class YieldExpression extends Expression {
         if (pfunc.async) {
             inyield = new getJSMethodCall([pfunc._ctrl, 'send'], [this.argument.toJS(o)]);
         } else {
-            var _inyield = !this.argument ? null : this.argument.toJS(o);
+            inyield = !this.argument ? null : this.argument.toJS(o);
         }
 
-        return new js.YieldExpression(inyield, false);
+        return new js.YieldExpression(inyield, this.delegate);
     }
 }
 
@@ -1475,7 +1532,7 @@ class AwaitExpression extends Expression {
         this.argument = argument;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var pfunc = this.getParentFunction();
         if (pfunc === null || !pfunc.async) {
             this.error("Await expression only allowed in async function!");
@@ -1495,7 +1552,7 @@ class ArrayExpression extends Expression {
         this.elements = elements;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var array = [];
         var _iteratorNormalCompletion19 = true;
         var _didIteratorError19 = false;
@@ -1536,7 +1593,7 @@ class ObjectExpression extends Expression {
         this.properties = properties;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var props = [];
         var _iteratorNormalCompletion20 = true;
         var _didIteratorError20 = false;
@@ -1585,7 +1642,7 @@ class Property extends Node {
         this.kind = kind;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Property(this.key.toJS(o), this.value.toJS(o), this.kind);
     }
 }
@@ -1600,7 +1657,7 @@ class SpreadElement extends Node {
         this.value = value;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.SpreadElement(this.value.toJS(o));
     }
 }
@@ -1899,9 +1956,10 @@ class ClassExpression extends Expression {
         this.body = body;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var body = [],
-            props = [];
+            props = [],
+            statprops = [];
 
         var _iteratorNormalCompletion26 = true;
         var _didIteratorError26 = false;
@@ -1912,7 +1970,17 @@ class ClassExpression extends Expression {
                 var line = _step26.value;
 
                 if (line instanceof MethodDefinition) {
-                    body.push(line.toJS(o));
+
+                    if (line.value.async) {
+                        // async methods are not supported in classes so instead they have
+                        // to be added to the list of prototype properties
+                        var bin = line['static'] ? statprops : props;
+                        if (line.kind !== "method") {
+                            line.error('"' + line.kind + '" method type not allowed as async in class definitions!');
+                        }
+
+                        bin.push(new js.Property(line.key, line.value.toJS(o)));
+                    } else body.push(line.toJS(o));
                 } else if (line instanceof ClassProperty) {
                     props.push(line.toJS(o));
                 } else {
@@ -1939,7 +2007,7 @@ class ClassExpression extends Expression {
         var superClass = defined(this.superClass) ? this.superClass.toJS(o) : null;
         var cls = new js.ClassExpression(null, superClass, body);
 
-        if (props.length === 0) {
+        if (props.length === 0 && statprops.length === 0) {
             if (defined(this.id)) {
                 return getJSAssign(this.id.name, cls, 'const');
             } else {
@@ -1947,6 +2015,11 @@ class ClassExpression extends Expression {
             }
         } else {
             var rapper = getJSMethodCall([LIB, 'classify'], [cls, new js.ObjectExpression(props)]);
+
+            if (statprops.length > 0) {
+                rapper.arguments.push(new js.ObjectExpression(statprops));
+            }
+
             if (defined(this.id)) {
                 return getJSAssign(this.id.name, rapper, 'const');
             } else {
@@ -1969,8 +2042,8 @@ exports.ClassExpression = ClassExpression;
 class MethodDefinition extends Node {
     constructor(key, value) {
         var kind = arguments.length <= 2 || arguments[2] === undefined ? "method" : arguments[2];
-        var computed = arguments.length <= 3 || arguments[3] === undefined ? false : arguments[3];
-        var isStatic = arguments.length <= 4 || arguments[4] === undefined ? false : arguments[4];
+        var isStatic = arguments.length <= 3 || arguments[3] === undefined ? false : arguments[3];
+        var computed = arguments.length <= 4 || arguments[4] === undefined ? false : arguments[4];
 
         super();
 
@@ -1979,11 +2052,11 @@ class MethodDefinition extends Node {
         this.key = key;
         this.value = value;
         this.kind = kind;
-        this.computed = computed;
         this['static'] = isStatic;
+        this.computed = computed;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.MethodDefinition(this.key.toJS(o), this.value.toJS(o), this.kind, this.computed, this['static']);
     }
 }
@@ -2002,7 +2075,7 @@ class ClassProperty extends Node {
         this.computed = computed;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Property(this.key.toJS(o), this.value.toJS(o));
     }
 }
@@ -2018,7 +2091,7 @@ class FunctionDeclaration extends Declaration {
         this.func = func;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.parent instanceof Program && this.identifier.name === 'main') {
 
             this.program.containsMain = true;
@@ -2084,7 +2157,7 @@ class FunctionExpression extends Expression {
         return -1;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var fn = undefined;
 
         if (this.modifier === '*') {
@@ -2193,7 +2266,7 @@ class FunctionExpression extends Expression {
                 }
 
                 if (param instanceof Identifier) {
-                    params.push(param.toJS({}));
+                    params.push(param.toJS(o));
                     if (def !== null) {
                         body.push(getJSAssign(param.name, getJSConditional(param.name, def.toJS(o))));
                     }
@@ -2243,17 +2316,16 @@ class FunctionExpression extends Expression {
         var noparams = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
 
         var body = this.body.toJS(o);
-
-        var _processParams = this.processParams(o);
-
-        var params = _processParams.params;
-        var prebody = _processParams.prebody;
-
         var i = 0;
 
         if (noparams) {
-            params = [];
-            prebody = [];
+            var params = [];
+            var prebody = [];
+        } else {
+            var _processParams = this.processParams(o);
+
+            var params = _processParams.params;
+            var prebody = _processParams.prebody;
         }
 
         body.body.prepend(statement(prebody));
@@ -2340,7 +2412,7 @@ class UnaryExpression extends Expression {
         this.prefix = prefix;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var operator;
         if (this.operator in convert) {
             operator = convert[this.operator];
@@ -2377,7 +2449,7 @@ class BinaryExpression extends Expression {
         this.right = right;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var left = this.left.toJS(o);
         var right = this.right.toJS(o);
         var operator = undefined;
@@ -2388,7 +2460,7 @@ class BinaryExpression extends Expression {
 
         if (this.operator + '=' in smoothOperators) {
             var fn = smoothOperators[this.operator + '='];
-            return fn(this.left.toJS(o), this.right.toJS(o));
+            return fn(left, right);
         }
 
         return new js.BinaryExpression(this.operator, left, right);
@@ -2417,12 +2489,14 @@ class ComparativeExpression extends Expression {
         return this;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var _getOpvars = this.getOpvars(1);
 
         var _getOpvars2 = _slicedToArray(_getOpvars, 1);
 
-        var opvar = _getOpvars2[0];
+        var opid = _getOpvars2[0];
+
+        var opvar = new js.Identifier(opid);
 
         var left = null,
             right = null,
@@ -2473,7 +2547,7 @@ class AssignmentExpression extends Expression {
         this.right = right;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.left instanceof Identifier || this.left instanceof MemberExpression) {
             var rightHandSide = undefined;
             if (this.operator in smoothOperators) {
@@ -2544,9 +2618,13 @@ class LogicalExpression extends Expression {
         super();
         setParent([left, right], this);
 
-        this.operator = assertLogicalOperator(operator);
+        this.operator = operator;
         this.left = left;
         this.right = right;
+    }
+
+    _toJS(o) {
+        return new js.LogicalExpression(this.operator, this.left.toJS(o), this.right.toJS(o));
     }
 }
 
@@ -2564,28 +2642,18 @@ class CallExpression extends Expression {
         this.isNew = isNew;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var args = [],
-            seenspread = false;
-        var catlist = [];
+            callee = this.callee.toJS(o);
         var _iteratorNormalCompletion31 = true;
         var _didIteratorError31 = false;
         var _iteratorError31 = undefined;
 
         try {
             for (var _iterator31 = this.arguments[Symbol.iterator](), _step31; !(_iteratorNormalCompletion31 = (_step31 = _iterator31.next()).done); _iteratorNormalCompletion31 = true) {
-                var arg = _step31.value;
+                var argument = _step31.value;
 
-                if (arg instanceof SpreadElement) {
-                    if (args.length > 0) {
-                        catlist.push(new js.ArrayExpression(args));
-                        args = [];
-                    }
-
-                    catlist.push(arg.value);
-                } else {
-                    args.push(arg.toJS(o));
-                }
+                args.push(argument.toJS(o));
             }
         } catch (err) {
             _didIteratorError31 = true;
@@ -2602,32 +2670,10 @@ class CallExpression extends Expression {
             }
         }
 
-        catlist.push(args);
-
-        if (catlist.length === 1 && catlist[0] === args) {
-            if (this.isNew) return new js.NewExpression(this.callee.toJS(o), args);else return new js.CallExpression(this.callee.toJS(o), args);
+        if (this.isNew) {
+            return new js.NewExpression(callee, args);
         } else {
-            var thisv = undefined,
-                memberv = undefined;
-
-            var _getOpvars3 = this.getOpvars(2);
-
-            var _getOpvars32 = _slicedToArray(_getOpvars3, 2);
-
-            var thisVar = _getOpvars32[0];
-            var memberExp = _getOpvars32[1];
-
-            if (this.callee instanceof MemberExpression) {
-                thisv = this.callee.object.toJS(o);
-                memberv = new js.MemberExpression(thisVar.toJS(o), this.callee.property.toJS(o), this.callee.computed);
-            } else {
-                thisv = new js.Literal(null);
-                memberv = this.callee.toJS(o);
-            }
-
-            if (this.isNew) return new getJSMethodCall([LIB, 'construct'], []);else {
-                return last([getJSAssign(thisVar.name, thisv), getJSAssign(memberExp.name, memberv), getJSMethodCall([memberExp.name, 'apply'], [thisVar, getJSMethodCall([LIB, 'concat'], [new js.ArrayExpression(catlist)])])]);
-            }
+            return new js.CallExpression(callee, args);
         }
     }
 }
@@ -2650,7 +2696,7 @@ class MemberExpression extends Expression {
         this.computed = computed;
     }
 
-    toJS(o) {
+    _toJS(o) {
         var object = this.object.toJS(o);
         var right = this.property.toJS(o);
         return new js.MemberExpression(object, right, this.computed);
@@ -2669,6 +2715,7 @@ class SwitchCase extends Node {
     }
 }
 
+// the catch part of try-catch
 exports.SwitchCase = SwitchCase;
 
 class CatchClause extends Node {
@@ -2680,10 +2727,11 @@ class CatchClause extends Node {
         this.body = body;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.param instanceof Identifier) {
             return new js.CatchClause(this.param.toJS(o), this.body.toJS(o));
         } else if (this.param instanceof Pattern) {
+            // same usual trickery to support error destructuring in catch clause
             var placeholder = nuVar('patternPlaceholder');
             var holderVar = new js.Identifier(placeholder);
             var declarations = getJSDeclare(this.param, holderVar, 'const');
@@ -2709,7 +2757,7 @@ class Identifier extends Expression {
         this.name = name;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Identifier(this.name);
     }
 }
@@ -2726,32 +2774,160 @@ class Literal extends Expression {
 
 exports.Literal = Literal;
 
-class StringLiteral extends Literal {
-    constructor(value) {
+class TemplateString extends Expression {
+
+    // removes unnecessary escapes from string literals being translated to JS
+    static removeEscapes(string) {
+        var buff = [];
+        var escapeMode = false;
+        var _iteratorNormalCompletion32 = true;
+        var _didIteratorError32 = false;
+        var _iteratorError32 = undefined;
+
+        try {
+            for (var _iterator32 = string[Symbol.iterator](), _step32; !(_iteratorNormalCompletion32 = (_step32 = _iterator32.next()).done); _iteratorNormalCompletion32 = true) {
+                var c = _step32.value;
+
+                if (escapeMode) {
+                    escapeMode = false;
+                    if (stringEscapeTable.hasOwnProperty(c)) {
+                        buff.push(stringEscapeTable[c]);
+                    } else {
+                        buff.push(c);
+                    }
+                } else {
+                    if (c === '\\') {
+                        escapeMode = true;
+                        continue;
+                    } else {
+                        buff.push(c);
+                    }
+                }
+            }
+        } catch (err) {
+            _didIteratorError32 = true;
+            _iteratorError32 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion32 && _iterator32['return']) {
+                    _iterator32['return']();
+                }
+            } finally {
+                if (_didIteratorError32) {
+                    throw _iteratorError32;
+                }
+            }
+        }
+
+        return buff.join('');
+    }
+
+    constructor(value, parts) {
         super(value);
+        var parser = require('./parser');
+
+        this.parts = [];
+        var _iteratorNormalCompletion33 = true;
+        var _didIteratorError33 = false;
+        var _iteratorError33 = undefined;
+
+        try {
+            for (var _iterator33 = parts[Symbol.iterator](), _step33; !(_iteratorNormalCompletion33 = (_step33 = _iterator33.next()).done); _iteratorNormalCompletion33 = true) {
+                var part = _step33.value;
+
+                // parts alternate between strings and arrays of tokens
+                if (part instanceof Array) {
+                    // if part is Array of tokens, parse then search for Expression in AST
+                    // and reasign parent to this TemplateString
+
+                    var ctrl = parser.parseRawTokens(part, {});
+                    if (ctrl.tree.body.length === 1) {
+                        var node = ctrl.tree.body[0];
+                        if (node instanceof ExpressionStatement) {
+                            var expr = node.expression;
+                            setParent(expr, this);
+                            this.parts.push(expr);
+                        } else {
+                            this.parts.push(null);
+                        }
+                    } else {
+                        this.parts.push(null);
+                    }
+                } else {
+                    this.parts.push(part);
+                }
+            }
+        } catch (err) {
+            _didIteratorError33 = true;
+            _iteratorError33 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion33 && _iterator33['return']) {
+                    _iterator33['return']();
+                }
+            } finally {
+                if (_didIteratorError33) {
+                    throw _iteratorError33;
+                }
+            }
+        }
+    }
+
+    _toJS(o) {
+        var ctor = this.constructor;
+        if (this.parts.length === 1) {
+            // if there is no interpolation
+            return new js.Literal(ctor.removeEscapes(this.parts[0]));
+        } else if (this.parts.length > 2) {
+            // if interpolation exists in string
+            var add = new js.BinaryExpression('+', new js.Literal(ctor.removeEscapes(this.parts[0])), // cause the first part is always a string
+            this.parts[1].toJS(o) // second part is an interpolation
+            );
+            for (var i = 2; i < this.parts.length; i++) {
+                var part = this.parts[i];
+                if (part === null) {
+                    // if interpolated expression is invalid it is set to null in `parts`
+                    this.error('Only single expressions allowed per interpolation!');
+                }
+
+                // parts alternate between expression and string
+                if (part instanceof Expression) {
+                    add = new js.BinaryExpression('+', add, part.toJS(o));
+                } else if (part.constructor === String) {
+                    add = new js.BinaryExpression('+', add, new js.Literal(this.constructor.removeEscapes(part)));
+                } else {
+                    part.error('Interpolated value not expression!');
+                }
+            }
+
+            return add;
+        } else {
+            this.error('Internal compiler error!');
+        }
     }
 }
 
-exports.StringLiteral = StringLiteral;
+// a raw single quoted string
+exports.TemplateString = TemplateString;
 
-class RawStringLiteral extends Literal {
+class StringLiteral extends Literal {
     constructor(value) {
         super(value.substring(1, value.length - 1));
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Literal(this.value);
     }
 }
 
-exports.RawStringLiteral = RawStringLiteral;
+exports.StringLiteral = StringLiteral;
 
 class NumberLiteral extends Literal {
     constructor(value) {
         super(value);
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Literal(+this.value);
     }
 }
@@ -2760,6 +2936,7 @@ exports.NumberLiteral = NumberLiteral;
 
 class All extends Node {}
 
+// a <id or *> as <id> pattern
 exports.All = All;
 
 class ModuleAlias extends Node {
@@ -2800,7 +2977,7 @@ class ImportStatement extends Statement {
         }
     }
 
-    toJS(o) {
+    _toJS(o) {
 
         if (this.target instanceof ModuleAlias) {
             // for: import <somevar or wildcard> as <some var or pattern> from <path> ... cases
@@ -2827,13 +3004,13 @@ class ImportStatement extends Statement {
             if (this.target instanceof Array) {
                 var varname = nuVar('imports');
                 var list = [getJSDeclare(new js.Identifier(varname), this.require(), 'const')];
-                var _iteratorNormalCompletion32 = true;
-                var _didIteratorError32 = false;
-                var _iteratorError32 = undefined;
+                var _iteratorNormalCompletion34 = true;
+                var _didIteratorError34 = false;
+                var _iteratorError34 = undefined;
 
                 try {
-                    for (var _iterator32 = this.target[Symbol.iterator](), _step32; !(_iteratorNormalCompletion32 = (_step32 = _iterator32.next()).done); _iteratorNormalCompletion32 = true) {
-                        var alias = _step32.value;
+                    for (var _iterator34 = this.target[Symbol.iterator](), _step34; !(_iteratorNormalCompletion34 = (_step34 = _iterator34.next()).done); _iteratorNormalCompletion34 = true) {
+                        var alias = _step34.value;
 
                         if (alias instanceof Identifier) {
                             list.push(getJSDeclare(alias, getJSMemberExpression([varname, alias.name]), 'const'));
@@ -2858,16 +3035,16 @@ class ImportStatement extends Statement {
                         }
                     }
                 } catch (err) {
-                    _didIteratorError32 = true;
-                    _iteratorError32 = err;
+                    _didIteratorError34 = true;
+                    _iteratorError34 = err;
                 } finally {
                     try {
-                        if (!_iteratorNormalCompletion32 && _iterator32['return']) {
-                            _iterator32['return']();
+                        if (!_iteratorNormalCompletion34 && _iterator34['return']) {
+                            _iterator34['return']();
                         }
                     } finally {
-                        if (_didIteratorError32) {
-                            throw _iteratorError32;
+                        if (_didIteratorError34) {
+                            throw _iteratorError34;
                         }
                     }
                 }
@@ -2893,19 +3070,19 @@ class ExportStatement extends Statement {
         this.isdefault = isdefault;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.isdefault) {
             return new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(EXP), getJSMemberExpression([LIB, 'symbols', 'default']), true), this.target.toJS(o));
         } else {
             if (this.target instanceof Array) {
                 var list = [];
-                var _iteratorNormalCompletion33 = true;
-                var _didIteratorError33 = false;
-                var _iteratorError33 = undefined;
+                var _iteratorNormalCompletion35 = true;
+                var _didIteratorError35 = false;
+                var _iteratorError35 = undefined;
 
                 try {
-                    for (var _iterator33 = this.target[Symbol.iterator](), _step33; !(_iteratorNormalCompletion33 = (_step33 = _iterator33.next()).done); _iteratorNormalCompletion33 = true) {
-                        var alias = _step33.value;
+                    for (var _iterator35 = this.target[Symbol.iterator](), _step35; !(_iteratorNormalCompletion35 = (_step35 = _iterator35.next()).done); _iteratorNormalCompletion35 = true) {
+                        var alias = _step35.value;
 
                         if (alias instanceof ModuleAlias) {
                             if (alias.origin instanceof All) {
@@ -2928,44 +3105,44 @@ class ExportStatement extends Statement {
                         }
                     }
                 } catch (err) {
-                    _didIteratorError33 = true;
-                    _iteratorError33 = err;
+                    _didIteratorError35 = true;
+                    _iteratorError35 = err;
                 } finally {
                     try {
-                        if (!_iteratorNormalCompletion33 && _iterator33['return']) {
-                            _iterator33['return']();
+                        if (!_iteratorNormalCompletion35 && _iterator35['return']) {
+                            _iterator35['return']();
                         }
                     } finally {
-                        if (_didIteratorError33) {
-                            throw _iteratorError33;
+                        if (_didIteratorError35) {
+                            throw _iteratorError35;
                         }
                     }
                 }
             } else {
                 var list = [this.target.toJS(o)];
-                var _iteratorNormalCompletion34 = true;
-                var _didIteratorError34 = false;
-                var _iteratorError34 = undefined;
+                var _iteratorNormalCompletion36 = true;
+                var _didIteratorError36 = false;
+                var _iteratorError36 = undefined;
 
                 try {
-                    for (var _iterator34 = this.target.extractVariables()[Symbol.iterator](), _step34; !(_iteratorNormalCompletion34 = (_step34 = _iterator34.next()).done); _iteratorNormalCompletion34 = true) {
-                        var _name = _step34.value;
+                    for (var _iterator36 = this.target.extractVariables()[Symbol.iterator](), _step36; !(_iteratorNormalCompletion36 = (_step36 = _iterator36.next()).done); _iteratorNormalCompletion36 = true) {
+                        var _name2 = _step36.value;
 
-                        var left = getJSMemberExpression([EXP, _name]);
-                        var right = new js.Identifier(_name);
+                        var left = getJSMemberExpression([EXP, _name2]);
+                        var right = new js.Identifier(_name2);
                         list.push(new js.AssignmentExpression('=', left, right));
                     }
                 } catch (err) {
-                    _didIteratorError34 = true;
-                    _iteratorError34 = err;
+                    _didIteratorError36 = true;
+                    _iteratorError36 = err;
                 } finally {
                     try {
-                        if (!_iteratorNormalCompletion34 && _iterator34['return']) {
-                            _iterator34['return']();
+                        if (!_iteratorNormalCompletion36 && _iterator36['return']) {
+                            _iterator36['return']();
                         }
                     } finally {
-                        if (_didIteratorError34) {
-                            throw _iteratorError34;
+                        if (_didIteratorError36) {
+                            throw _iteratorError36;
                         }
                     }
                 }

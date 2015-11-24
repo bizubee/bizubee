@@ -1,5 +1,5 @@
 
-test('Simple class with property', (api) -> {
+test('Class with property', (api) -> {
     class tester {
         constructor() ->
             @prop = 5
@@ -10,7 +10,7 @@ test('Simple class with property', (api) -> {
     api.done()
 })
 
-test('Simple class', (api) -> {
+test('Class with method', (api) -> {
     class tester {
         constructor() ->
             @prop = 5
@@ -23,4 +23,62 @@ test('Simple class', (api) -> {
     api.eq(meth.prop, 5)
     api.eq(meth.double(), 10)
     api.done()
+})
+
+test('Class with generator method', (api) -> {
+    class tester {
+        constructor() ->
+            @prop = 5
+            
+        multiply() -> *
+            yield @prop * 5
+            return @prop * 2
+    }
+    
+    var meth = new tester()
+    var gen = meth.multiply()
+    api.eq(gen.next().value, 25)
+    api.eq(gen.next().value, 10)
+    api.done()
+})
+
+test('Class with async method', (api) -> {
+    class tester {
+        constructor() ->
+            @prop = 5
+            
+        multiply() -> ~
+            var
+            ,   a = await Promise.resolve(2)
+            ,   b = await Promise.resolve(9)
+            return @prop * a * b
+    }
+    
+    var meth = new tester()
+    meth.multiply().then((val) -> {
+        api.eq(val, 90)
+        api.done()
+    })
+})
+
+test('Class with static async method', (api) -> {
+    class tester {
+        constructor() ->
+            @prop = 5
+            
+        static multiply() -> ~
+            api.eq(this, tester)
+        
+            var
+            ,   a = await Promise.resolve(2)
+            ,   b = await Promise.resolve(9)
+            return a * b
+    }
+    
+    var meth = new tester()
+    api.eq(meth.prop, 5)
+    tester.multiply().then((val) -> {
+        api.eq(val, 18)
+        api.done()
+    })
 })

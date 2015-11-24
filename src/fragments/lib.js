@@ -1,15 +1,17 @@
 (function(){
-    const modcache = new Map();
+    "use strict";
+    
     const symbols = {
         observer: Symbol('Observer symbol'),
         export: Symbol('Export symbol')
     };
     
-    var modules = null;
+    const returnVal = function(val) {
+        return val;
+    };
     
-    return {
+    const api = {
         symbols,
-        
         async(fn) {
         	return function () {
         		var gen = fn.apply(this, arguments);
@@ -92,26 +94,6 @@
         
         	return api;
         },
-        setModules(mdls) {
-            modules = mdls
-        },
-        require(n) {
-            if (modules.hasOwnProperty(n)) {
-                if (modcache.has(n)) {
-                    return modcache.get(n);
-                } else {
-                    const exports   = {};
-                    const modfn     = modules[n];
-                    
-                    modfn(exports);
-                    
-                    modcache.set(n, exports);
-                    return exports;
-                }
-            } else {
-                throw new Error(`Cannot find module #${n}!`);
-            }
-        },
         rest(iterable) {
         	let array = [];
         	for (let val of iterable) {
@@ -147,6 +129,55 @@
         		return;
         	
         	return arguments[arguments.length - 1];
+        },
+        classify(cls, protoProps, staticProps) {
+        	var proto = cls.prototype;
+        	for (var key in protoProps) {
+        		if (protoProps[key] instanceof Function) {
+        			proto[key] = protoProps[key];
+        		} else {
+        			Object.defineProperty(proto, key, {
+        				get: returnVal.bind(null, protoProps[key])
+        			});
+        		}
+        	}
+        	
+        	for (var key in staticProps) {
+        	    cls[key] = staticProps[key];
+        	}
+        	
+        	return cls;
         }
+    }
+    
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = api;
+    } else {
+        let modules = null;
+        
+        const modcache = new Map();
+        
+        api.setModules = function(mdls) {
+            modules = mdls;
+        };
+        api.require = function(n) {
+            if (modules.hasOwnProperty(n)) {
+                if (modcache.has(n)) {
+                    return modcache.get(n);
+                } else {
+                    const exports   = {};
+                    const modfn     = modules[n];
+                    
+                    modfn(exports);
+                    
+                    modcache.set(n, exports);
+                    return exports;
+                }
+            } else {
+                throw new Error(`Cannot find module #${n}!`);
+            }
+        };
+        
+        return api;
     }
 }).apply(this, []);

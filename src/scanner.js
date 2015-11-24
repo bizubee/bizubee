@@ -25,6 +25,7 @@ const JS_KW = new Set([
 	"let",
 	"new",
 	"return",
+	"static",
 	"super",
 	"switch",
 	"this",
@@ -48,6 +49,8 @@ const JSL_KW = new Set([
 	"from",
 	"pass",
 	"as",
+	"and",
+	"or",
 	"then"
 ]);
 
@@ -264,7 +267,7 @@ const total = [
 		tag: 'ASSIGN'
 	},
 	{
-		pattern: '..',
+		pattern: '...',
 		tag: 'SPLAT'
 	},
 	{
@@ -429,7 +432,7 @@ Token.prototype.fetch = function(cursor) {
 
 function getInterpolationTokens(cursor) {
 	var tokens = [], indent = 0;
-	for (let token of getRawTokens(cursor)) {
+	for (let token of getTokensFromCursor(cursor)) {
 		if (token.tag === 'EOF') {
 			throw new Error("Unexpected EOF!!!");
 		}

@@ -16,6 +16,8 @@ const OKEY = Symbol('Options key');
 
 const IGNORE = Symbol('Ingorable properties');
 
+const EMPTY = new js.EmptyStatement();
+
 const binaryOperator = new Set([
     "==",
     "!=",
@@ -75,6 +77,14 @@ const convert = {
     '&': '+'
 };
 
+const stringEscapeTable = {
+    'n': '\n',
+    'r': '\r',
+    't': '\t',
+    'b': '\b',
+    'f': '\f'
+};
+
 const PATH_MAP = new Map();
 const PARENT_KEY = Symbol('parent');
 const POSITION_KEY = Symbol('position');
@@ -118,6 +128,7 @@ function defined(val) {
     return val !== undefined && val !== null;
 }
 
+// keeps track of underscoring necessary for util vars to avoid collisions
 function knowIdLead(name) {
     var i = 0;
     while (i < name.length) {
@@ -136,6 +147,7 @@ function last(jsargs) {
     return getJSMethodCall([LIB, 'last'], jsargs);
 }
 
+// returns new variable name that won't conflict with existing vars in AST
 function nuVar(txt = 'bzbVar') {
     let variable = `${MAX_LEAD}_${txt}`;
     if (vars.has(variable)) {
@@ -350,6 +362,7 @@ export class Node {
         this[IGNORE] = new Set();
         this.type = this.constructor.name;
         this.loc = null;
+        this.compiled = false;
         nodeQueue.eat(this);
     }
 
@@ -405,8 +418,18 @@ export class Node {
         return this;
     }
 
+    toJS(o) {
+        if (this.compiled) {
+            this.error(`Cannot recompile ${this.constructor.name} node!`);
+            throw new Error('Cannot compile node more than once!');
+        } else {
+            this.compiled = true;
+            return this._toJS(o);
+        }
+    }
+    
     // make sure this method is implemented for all node subclasses
-    toJS() {
+    _toJS(o) {
         this.error('Method "toJS" not implemented!');
     }
 
@@ -531,6 +554,7 @@ export class Scope extends Node {
         
         this.body = statements;
         this._opvars = [];
+        this._funcDeclarations = new Map();
     }
 
     getOpvars(n) {
@@ -539,7 +563,7 @@ export class Scope extends Node {
             if (this._opvars.length === i)
                 this._opvars.push(nuVar('op'));
             
-            arr[i] = new js.Identifier(this._opvars[i]);
+            arr[i] = this._opvars[i];
        }
        
        return arr;
@@ -547,8 +571,22 @@ export class Scope extends Node {
 
     getOpvarsDeclaration() {
         let identifiers = 
-            this.getOpvars(this._opvars.length);
+            this.getOpvars(this._opvars.length)
+                .map(id => new js.Identifier(id));
         return new js.VariableDeclaration(identifiers, 'let');
+    }
+
+    getFunctionDeclarations() {
+        const declarators = [];
+        for (var [name, func] of this._funcDeclarations) {
+            const declarator = new js.VariableDeclarator(
+                new js.Identifier(name),
+                func
+                );
+            declarators.push(declarator);
+        }
+        
+        return new js.VariableDeclaration(declarators, 'const');
     }
 
     [Symbol.iterator] () {
@@ -571,9 +609,34 @@ export class Scope extends Node {
     }
 
     * getJSLines(o) {
+        
         for (let line of this.body) {
+            // if line is a function declaration we compile the function
+            // then save it in a map to be put later in a const declaration at top of
+            // scope, cause all function declarations are 'bubbled' to the top of their scope
+
+            if (line instanceof FunctionDeclaration) {
+            
+            
+                const name = line.identifier.name;
+            
+                if (this._funcDeclarations.has(name)) {
+                    line.error('Cannot declare function more than once!');
+                }
+                
+                this._funcDeclarations.set(
+                    name,
+                    line.func.toJS(o)
+                    );
+                
+                continue;
+            }
+            
             let nodes = line.toJS(o);
             if (nodes instanceof Array) {
+                // if the js compilation is a serialisation (array) of nodes
+                // we must yield each node of the serialization individually
+                
                 for (let subline of nodes) {
                     yield statement(subline);
                 }
@@ -629,9 +692,10 @@ export class Program extends Scope {
         const modmap            = new Map();
         const cache             = new Set();
         const modules           = [];
+        const instructions      = [
+            statement(new js.Literal('use strict'))
+        ];
         const directives        = [
-            statement(new js.Literal('use strict')),
-            this.getOpvarsDeclaration()
         ];
         
         for (let [abspath, program] of
@@ -643,10 +707,10 @@ export class Program extends Scope {
         EXP = nuVar('exports');
         LIB = nuVar('bzbSupportLib');
         
-        directives.push(getJSDeclare(
+        instructions.push(getJSDeclare(
             new js.Identifier(LIB),
             acorn.parseExpressionAt(
-                fs.readFileSync('src/fragments/lib.js', 'utf8'),
+                fs.readFileSync(`${__dirname}/fragments/lib.js`, 'utf8'),
                 0,
                 {ecmaVersion: 6}
                 ),
@@ -662,7 +726,7 @@ export class Program extends Scope {
                 );   
         }
         
-        directives.push(statement(getJSMethodCall(
+        instructions.push(statement(getJSMethodCall(
             [LIB, 'setModules'],
             [new js.ObjectExpression(modules)]
             )));
@@ -672,23 +736,25 @@ export class Program extends Scope {
             directives.push(jsline);
         }
      
-        if (this._opvars.length === 0)
-            directives[1] = new js.EmptyStatement();
-            
-        return new js.BlockStatement(directives);
+        if (this._funcDeclarations.size > 0)
+            directives.unshift(this.getFunctionDeclarations());
+        if (this._opvars.length > 0)
+            directives.unshift(this.getOpvarsDeclaration());
+
+        return new js.BlockStatement([...instructions, new js.BlockStatement(directives)]);
     }
     
     compileBrowserModule(o) {
-        var instructions = statement([
-            this.getOpvarsDeclaration()
-        ]);
+        var instructions = [];
 
         for (let jsline of this.getJSLines(o)) {
             instructions.push(jsline);
         }
 
-        if (this._opvars.length === 0)
-            instructions.shift();
+        if (this._funcDeclarations.size > 0)
+            instructions.unshift(this.getFunctionDeclarations());
+        if (this._opvars.length > 0)
+            instructions.unshift(this.getOpvarsDeclaration());
 
         return new js.FunctionExpression(
             null,
@@ -702,9 +768,10 @@ export class Program extends Scope {
         EXP = nuVar('moduleExports');
         var instructions = statement([
             new js.Literal("use strict"),
-            this.getOpvarsDeclaration(),
             getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal('bizubee lib')]), 'const'),
             getJSDeclare(new js.Identifier(EXP, false), getJSMethodCall([LIB, 'module'], [])),
+            EMPTY,
+            EMPTY,
         ]) || o.instructions;
 
         for (let jsline of this.getJSLines(o)) {
@@ -729,13 +796,15 @@ export class Program extends Scope {
             );
         
 
-        if (this._opvars.length === 0)
-            instructions[1] = new js.EmptyStatement();
+        if (this._opvars.length > 0)
+            instructions[3] = this.getOpvarsDeclaration();
+        if (this._funcDeclarations.size > 0)
+            instructions[4] = this.getFunctionDeclarations();
 
         return new js.Program(instructions);
     }
     
-    toJS(o) {
+    _toJS(o) {
         if (this.parameters.browser) {
             if (this.parameters.browser.root) {
                 return this.compileBrowser(o);
@@ -761,27 +830,19 @@ export class Statement extends Node {
 }
 
 export class BlockStatement extends Scope {
-    toJS(o) {
+    _toJS(o) {
         var instructions = [] || o.instructions;
-        for (let line of this.body) {
-            let nodes = line.toJS(o);
-            if (nodes instanceof Array) {
-                for (let subline of nodes) {
-                    instructions.push(subline);
-                }
-            } else if (nodes instanceof js.Node) {
-                if (nodes instanceof js.Expression) {
-                    instructions.push(statement(nodes))
-                } else instructions.push(nodes);
-            } else {
-                this.error(`Invalid object ${typeof nodes}!`);
-            }
+        for (let line of this.getJSLines(o)) {
+            if (line instanceof js.Expression)
+                instructions.push(statement(line))
+            else
+                instructions.push(line);
         }
         
+        if (this._funcDeclarations.size > 0)
+            instructions.unshift(this.getFunctionDeclarations());
         if (this._opvars.length > 0)
-            instructions.unshift(
-                this.getOpvarsDeclaration()
-                );
+            instructions.unshift(this.getOpvarsDeclaration());
 
         return new js.BlockStatement(instructions);
     }
@@ -795,7 +856,7 @@ export class ExpressionStatement extends Statement {
         this.expression = expression;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.ExpressionStatement(this.expression.toJS(o));
     }
 }
@@ -811,7 +872,7 @@ export class IfStatement extends Statement {
         this.alternate = alternate;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let test        = this.test.toJS(o);
         let consequent  = this.consequent.toJS(o);
         let alternate   = null;
@@ -838,7 +899,7 @@ export class BreakStatement extends Statement {
         this.label = label;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.BreakStatement();
     }
 }
@@ -851,7 +912,7 @@ export class ContinueStatement extends Statement {
         this.label = label;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.ContinueStatement();
     }
 }
@@ -877,7 +938,7 @@ export class ReturnStatement extends Statement {
         this.after = after;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (defined(this.after)) {
             if (this.after instanceof ReturnStatement)
                 this.after.error('Cannot return from function multiple times!');
@@ -909,7 +970,7 @@ export class ThrowStatement extends Statement {
         this.argument = argument;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.ThrowStatement(this.argument.toJS(o));
     }
 }
@@ -924,7 +985,7 @@ export class TryStatement extends Statement {
         this.finalizer = finalizer;
     }
     
-    toJS(o) {
+    _toJS(o) {
         let handler = (defined(this.handler)) ? this.handler.toJS(o) : null;
         let finalizer = (defined(this.finalizer)) ? this.finalizer.toJS(o) : null;
         return new js.TryStatement(
@@ -945,7 +1006,7 @@ export class WhileStatement extends Statement {
         this.body = body;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let test = this.test.toJS(o);
         let body = this.body.toJS(o);
 
@@ -964,7 +1025,7 @@ export class ForStatement extends Statement {
         this.async = async;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.async) return this.asyncToJS(o);
         else return this.syncToJS(o);
     }
@@ -1055,7 +1116,7 @@ export class VariableDeclaration extends Declaration {
         }
     }
 
-    toJS(o) {
+    _toJS(o) {
         let jsvars = [];
         let type = (this.constant) ? 'const' : 'let';
 
@@ -1086,14 +1147,16 @@ export class VariableDeclarator extends Node {
         this.init = init;
     }
 
-    toJS(o) {
+    _toJS(o) {
+        // always return an array
+        
         let init = (!!this.init) ? this.init.toJS(o) : null;
         if (this.id instanceof Pattern) {
             if (init === null)
                 this.id.error('All pattern declarations must be initialized!');
 
             let nuvar = nuVar('patternPlaceholder');
-            let arr = [new js.VariableDeclarator(new js.Identifier(nuvar), this.init.toJS(o))];
+            let arr = [new js.VariableDeclarator(new js.Identifier(nuvar), init)];
 
             for (let pattern of this.id.extractAssigns(new js.Identifier(nuvar))) {
                 arr.push(pattern);
@@ -1115,21 +1178,21 @@ export class Expression extends Node {
 }
 
 export class ThisExpression extends Expression {
-    toJS(o) {
+    _toJS(o) {
         return new js.ThisExpression();
     }
 }
 
 export class YieldExpression extends Expression {
-    constructor(argument = null) {
+    constructor(argument = null, delegate = false) {
         super(argument);
         setParent(argument, this);
 
-        this._ctrl = null;
         this.argument = argument;
+        this.delegate = delegate;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let inyield, pfunc = this.getParentFunction();
         if (pfunc === null || !pfunc.generator) {
             this.error('Yield expression only allowed inside a generator function!');
@@ -1141,11 +1204,11 @@ export class YieldExpression extends Expression {
                 [this.argument.toJS(o)]
                 );
         } else {
-            let inyield = (!this.argument) ? null : this.argument.toJS(o);
+            inyield = (!this.argument) ? null : this.argument.toJS(o);
         }
 
 
-        return new js.YieldExpression(inyield, false);
+        return new js.YieldExpression(inyield, this.delegate);
     }
 }
 
@@ -1157,7 +1220,7 @@ export class AwaitExpression extends Expression {
         this.argument = argument;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let pfunc = this.getParentFunction();
         if (pfunc === null || !pfunc.async) {
             this.error("Await expression only allowed in async function!");
@@ -1175,7 +1238,7 @@ export class ArrayExpression extends Expression {
         this.elements = elements;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let array = [];
         for (let element of this.elements) {
             array.push(element.toJS(o));
@@ -1192,7 +1255,7 @@ export class ObjectExpression extends Expression {
         this.properties = properties;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let props = [];
         for (let prop of this.properties) {
             props.push(prop.toJS(o));
@@ -1218,7 +1281,7 @@ export class Property extends Node {
         this.kind = kind;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Property(
             this.key.toJS(o),
             this.value.toJS(o),
@@ -1235,7 +1298,7 @@ export class SpreadElement extends Node {
         this.value = value;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.SpreadElement(this.value.toJS(o));
     }
 }
@@ -1443,12 +1506,30 @@ export class ClassExpression extends Expression {
 		this.body = body;
 	}
 	
-	toJS(o) {
-	    let body = [], props = [];
+	_toJS(o) {
+	    let body = [], props = [], statprops = [];
 	    
 	    for (let line of this.body) {
 	        if (line instanceof MethodDefinition) {
-	            body.push(line.toJS(o));
+	            
+	            if (line.value.async) {
+	                // async methods are not supported in classes so instead they have 
+	                // to be added to the list of prototype properties
+	                let bin = line.static ? statprops : props;
+	                if (line.kind !== "method") {
+	                    line.error(
+	                        `"${line.kind}" method type not allowed as async in class definitions!`
+	                        );
+	                }
+	                
+                    bin.push(
+                        new js.Property(
+                            line.key,
+                            line.value.toJS(o)
+                            )
+                        );
+	            } else
+	                body.push(line.toJS(o));
 	        } else if (line instanceof ClassProperty) {
 	            props.push(line.toJS(o));
 	        } else {
@@ -1460,7 +1541,7 @@ export class ClassExpression extends Expression {
 	    let superClass  = defined(this.superClass) ? this.superClass.toJS(o) : null;
 	    let cls         = new js.ClassExpression(null, superClass, body);
 	    
-	    if (props.length === 0) {
+	    if (props.length === 0 && statprops.length === 0) {
 	        if (defined(this.id)) {
 	            return getJSAssign(this.id.name, cls, 'const');
 	        } else {
@@ -1471,6 +1552,13 @@ export class ClassExpression extends Expression {
 	            cls,
 	            new js.ObjectExpression(props)
 	        ]);
+	        
+	        if (statprops.length > 0) {
+	            rapper.arguments.push(
+	                new js.ObjectExpression(statprops)
+	                );
+	        }
+	        
 	        if (defined(this.id)) {
 	            return getJSAssign(this.id.name, rapper, 'const');
 	        } else {
@@ -1489,7 +1577,7 @@ export class ClassExpression extends Expression {
 }
 
 export class MethodDefinition extends Node {
-	constructor(key, value, kind = "method", computed = false, isStatic = false) {
+	constructor(key, value, kind = "method", isStatic = false, computed = false) {
 		super();
 		
 		setParent([key, value], this);
@@ -1497,11 +1585,11 @@ export class MethodDefinition extends Node {
 		this.key = key;
 		this.value = value;
 		this.kind = kind;
-		this.computed = computed;
 		this.static = isStatic;
+		this.computed = computed;
 	}
 	
-	toJS(o) {
+	_toJS(o) {
 	    return new js.MethodDefinition(
 	        this.key.toJS(o),
 	        this.value.toJS(o),
@@ -1522,7 +1610,7 @@ export class ClassProperty extends Node {
         this.computed = computed;
     }
     
-    toJS(o) {
+    _toJS(o) {
         return new js.Property(
             this.key.toJS(o),
             this.value.toJS(o)
@@ -1540,7 +1628,7 @@ export class FunctionDeclaration extends Declaration {
         this.func = func;
     }
     
-    toJS(o) {
+    _toJS(o) {
         if (this.parent instanceof Program &&
             this.identifier.name === 'main') {
             
@@ -1592,7 +1680,7 @@ export class FunctionExpression extends Expression {
         return -1;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let fn;
         
         if (this.modifier === '*') {
@@ -1675,7 +1763,7 @@ export class FunctionExpression extends Expression {
             }
             
             if (param instanceof Identifier) {
-                params.push(param.toJS({}));
+                params.push(param.toJS(o));
                 if (def !== null) {
                     body.push(
                         getJSAssign(
@@ -1723,13 +1811,13 @@ export class FunctionExpression extends Expression {
 
     regularToJs(o, noparams = false) {
         let body = this.body.toJS(o);
-        let {params, prebody} = this.processParams(o);
         let i = 0;
         
 
         if (noparams) {
-            params = [];
-            prebody = [];
+            var [params, prebody] = [[], []];
+        } else {
+            var {params, prebody} = this.processParams(o);
         }
 
         body.body.prepend(statement(prebody));
@@ -1823,7 +1911,7 @@ export class UnaryExpression extends Expression {
         this.prefix = prefix;
     }
     
-    toJS(o) {
+    _toJS(o) {
         var operator;
         if (this.operator in convert) {
             operator = convert[this.operator];
@@ -1864,7 +1952,7 @@ export class BinaryExpression extends Expression {
         this.right = right;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let left = this.left.toJS(o);
         let right = this.right.toJS(o);
         let operator;
@@ -1879,7 +1967,7 @@ export class BinaryExpression extends Expression {
 
         if ((this.operator + '=') in smoothOperators) {
             let fn = smoothOperators[this.operator + '='];
-            return fn(this.left.toJS(o), this.right.toJS(o));
+            return fn(left, right);
         }
         
         return new js.BinaryExpression(this.operator, left, right);
@@ -1906,8 +1994,9 @@ export class ComparativeExpression extends Expression {
         return this;
     }
     
-    toJS(o) {
-        const [opvar]   = this.getOpvars(1);
+    _toJS(o) {
+        const [opid]    = this.getOpvars(1);
+        const opvar     = new js.Identifier(opid);
         
         let
         left    = null,
@@ -1976,7 +2065,7 @@ export class AssignmentExpression extends Expression {
         this.right = right;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.left instanceof Identifier ||
             this.left instanceof MemberExpression) {
             let rightHandSide;
@@ -2027,9 +2116,17 @@ export class LogicalExpression extends Expression {
         super();
         setParent([left, right], this);
 
-        this.operator = assertLogicalOperator(operator);
+        this.operator = operator;
         this.left = left;
         this.right = right;
+    }
+    
+    _toJS(o) {
+        return new js.LogicalExpression(
+            this.operator,
+            this.left.toJS(o),
+            this.right.toJS(o)
+            );
     }
 }
 
@@ -2044,68 +2141,16 @@ export class CallExpression extends Expression {
         this.isNew = isNew;
     }
 
-    toJS(o) {
-        let args = [], seenspread = false;
-        let catlist = [];
-        for (let arg of this.arguments) {
-            if (arg instanceof SpreadElement) {
-                if (args.length > 0) {
-                    catlist.push(new js.ArrayExpression(args));
-                    args = [];
-                }
-                
-                catlist.push(arg.value);
-            } else {
-                args.push(arg.toJS(o));
-            }
+    _toJS(o) {
+        var args = [], callee = this.callee.toJS(o);
+        for (var argument of this.arguments) {
+            args.push(argument.toJS(o));
         }
-
-        catlist.push(args);
         
-
-        if (catlist.length === 1 && catlist[0] === args) {
-            if (this.isNew)
-                return new js.NewExpression(this.callee.toJS(o), args);
-            else
-                return new js.CallExpression(this.callee.toJS(o), args);
+        if (this.isNew) {
+            return new js.NewExpression(callee, args);
         } else {
-            let thisv, memberv;
-            let [thisVar, memberExp] = this.getOpvars(2);
-            
-            
-            if (this.callee instanceof MemberExpression) {
-                thisv = this.callee.object.toJS(o);
-                memberv = new js.MemberExpression(
-                    thisVar.toJS(o),
-                    this.callee.property.toJS(o),
-                    this.callee.computed
-                    );
-            } else {
-                thisv = new js.Literal(null);
-                memberv = this.callee.toJS(o);
-            }
-
-            if (this.isNew)
-                return new getJSMethodCall([LIB, 'construct'], []);
-            else {
-                return last([
-                    getJSAssign(thisVar.name, thisv),
-                    getJSAssign(memberExp.name, memberv),
-                    getJSMethodCall(
-                        [
-                            memberExp.name,
-                            'apply'
-                        ],
-                        [
-                            thisVar,
-                            getJSMethodCall(
-                                [LIB, 'concat'],
-                                [new js.ArrayExpression(catlist)]
-                                )
-                        ]
-                    )
-                    ]);
-            }
+            return new js.CallExpression(callee, args);
         }
     }
 }
@@ -2124,7 +2169,7 @@ export class MemberExpression extends Expression {
         this.computed = computed;
     }
 
-    toJS(o) {
+    _toJS(o) {
         let object = this.object.toJS(o);
         let right = this.property.toJS(o);
         return new js.MemberExpression(object, right, this.computed);
@@ -2141,6 +2186,7 @@ export class SwitchCase extends Node {
     }
 }
 
+// the catch part of try-catch
 export class CatchClause extends Node {
     constructor(param, body) {
         super();
@@ -2150,13 +2196,14 @@ export class CatchClause extends Node {
         this.body = body;
     }
     
-    toJS(o) {
+    _toJS(o) {
         if (this.param instanceof Identifier) {
             return new js.CatchClause(
                 this.param.toJS(o),
                 this.body.toJS(o)
                 );
         } else if (this.param instanceof Pattern) {
+            // same usual trickery to support error destructuring in catch clause
             let placeholder     = nuVar('patternPlaceholder');
             let holderVar       = new js.Identifier(placeholder);
             let declarations    = getJSDeclare(this.param, holderVar, 'const');
@@ -2178,7 +2225,7 @@ export class Identifier extends Expression {
         this.name = name;
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Identifier(this.name);
     }
 }
@@ -2191,18 +2238,113 @@ export class Literal extends Expression {
     }
 }
 
-export class StringLiteral extends Literal {
-    constructor(value) {
+export class TemplateString extends Expression {
+    
+    // removes unnecessary escapes from string literals being translated to JS
+    static removeEscapes(string) {
+        const buff = []
+        var escapeMode = false;
+        for (var c of string) {
+            if (escapeMode) {
+                escapeMode = false;
+                if (stringEscapeTable.hasOwnProperty(c)) {
+                    buff.push(stringEscapeTable[c]);
+                } else {
+                    buff.push(c);
+                }
+            } else {
+                if (c === '\\') {
+                    escapeMode = true;
+                    continue;
+                } else {
+                    buff.push(c);
+                }
+            }
+        }
+        
+        return buff.join('');
+    }
+    
+    constructor(value, parts) {
         super(value);
+        const parser = require('./parser');
+        
+        this.parts = [];
+        for (var part of parts) {
+            // parts alternate between strings and arrays of tokens
+            if (part instanceof Array) {
+                // if part is Array of tokens, parse then search for Expression in AST
+                // and reasign parent to this TemplateString
+                
+                var ctrl = parser.parseRawTokens(part, {});
+                if (ctrl.tree.body.length === 1) {
+                    const node = ctrl.tree.body[0];
+                    if (node instanceof ExpressionStatement) {
+                        const expr = node.expression;
+                        setParent(expr, this);
+                        this.parts.push(expr);
+                    } else {
+                        this.parts.push(null);
+                    }
+                } else {
+                    this.parts.push(null);
+                }
+            } else {
+                this.parts.push(part);
+            }
+        }
+    }
+    
+    _toJS(o) {
+        const ctor = this.constructor;
+        if (this.parts.length === 1) {              // if there is no interpolation
+            return new js.Literal(ctor.removeEscapes(this.parts[0]));
+        } else if (this.parts.length > 2) {             // if interpolation exists in string
+            let add = new js.BinaryExpression(
+                '+',
+                new js.Literal(ctor.removeEscapes(this.parts[0])),      // cause the first part is always a string
+                this.parts[1].toJS(o)               // second part is an interpolation
+                );
+            for (var i = 2; i < this.parts.length; i++) {
+                const part = this.parts[i];
+                if (part === null) {                // if interpolated expression is invalid it is set to null in `parts`
+                    this.error('Only single expressions allowed per interpolation!');
+                }
+                
+                // parts alternate between expression and string
+                if (part instanceof Expression) {
+                    add = new js.BinaryExpression(
+                        '+',
+                        add,
+                        part.toJS(o)
+                        );
+                } else if (part.constructor === String) {
+                    add = new js.BinaryExpression(
+                        '+',
+                        add,
+                        new js.Literal(
+                            this.constructor.removeEscapes(part)
+                            )
+                        );
+                } else {
+                    part.error('Interpolated value not expression!');
+                }
+            }
+            
+            return add;
+        } else {
+            this.error('Internal compiler error!');
+        }
     }
 }
 
-export class RawStringLiteral extends Literal {
+// a raw single quoted string
+export class StringLiteral extends Literal {
     constructor(value) {
         super(value.substring(1, value.length - 1));
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Literal(this.value);
     }
 }
@@ -2212,7 +2354,7 @@ export class NumberLiteral extends Literal {
         super(value);
     }
 
-    toJS(o) {
+    _toJS(o) {
         return new js.Literal(+this.value);
     }
 }
@@ -2222,6 +2364,7 @@ export class NumberLiteral extends Literal {
 export class All extends Node {
 }
 
+// a <id or *> as <id> pattern
 export class ModuleAlias extends Node {
     constructor(origin, target) {
         super();
@@ -2269,7 +2412,7 @@ export class ImportStatement extends Statement {
         }
     }
 
-    toJS(o) {
+    _toJS(o) {
         
         if (this.target instanceof ModuleAlias) { 
             // for: import <somevar or wildcard> as <some var or pattern> from <path> ... cases
@@ -2359,7 +2502,7 @@ export class ExportStatement extends Statement {
         this.isdefault = isdefault;
     }
 
-    toJS(o) {
+    _toJS(o) {
         if (this.isdefault) {
             return new js.AssignmentExpression(
                 '=',

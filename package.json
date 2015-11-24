@@ -1,6 +1,6 @@
 {
   "name": "bizubee",
-  "version": "0.0.9",
+  "version": "0.0.20",
   "description": "The most intense programming language on Earth!",
   "main": "bizubee.js",
   "dependencies": {

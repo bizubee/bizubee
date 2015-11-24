@@ -7,3 +7,38 @@ test('Basic generator function declaration', (api) -> {
     
     api.done()
 })
+
+test('Basic generator usage', (api) -> {
+    var gen = () -> * {
+        yield 4
+        yield 5
+    }
+    
+    var arr = []
+    
+    for val in gen()
+        arr.push(val)
+    
+    api.arrayEq(arr, [4, 5])
+    api.done()
+})
+
+test('Generator delegation', (api) -> {
+    var srcGen = () -> * {
+        yield 4
+        yield 5
+    }
+    
+    var gen = () -> * {
+        yield* srcGen()
+        yield 1
+    }
+
+    var arr = []
+    
+    for val in gen()
+        arr.push(val)
+    
+    api.arrayEq(arr, [4, 5, 1])
+    api.done()
+})

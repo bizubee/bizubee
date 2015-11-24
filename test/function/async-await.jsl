@@ -40,7 +40,7 @@ test('Async function with array destructuring', (api) -> {
 })
 
 test('Async function with single splatt', (api) -> {
-	var afn = (..args) -> ~ {
+	var afn = (...args) -> ~ {
 		api.arrayEq(args, [2, 3, 4])
 		return args[0] * args[1] * args[2]
 	}

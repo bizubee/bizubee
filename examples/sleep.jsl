@@ -1,0 +1,30 @@
+
+import {range} from ./util
+
+sleep(ms) -> {
+    return new Promise((win, fail) -> {
+        setTimeout(win, ms)
+    })
+}
+
+ticker(n) -> ~* {
+    var time = 1000 # in ms
+    var passed = 0
+    for i in range(0, n)
+        await sleep(time)
+        passed += time
+        yield passed
+}
+
+main() -> ~ {
+    var pulser = setInterval(
+        () -> {
+            console.log('pulse')
+        }
+        500
+    )
+    
+    for passed on ticker(20)
+        console.log(passed)
+    clearInterval(pulser)
+}

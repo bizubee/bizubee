@@ -36,7 +36,7 @@
 %left '*' '//' '%' '/'
 %right UMIN UPLUS
 %left '^'
-%left 'AWAIT'
+%left 'AWAIT' 'YIELD_FROM'
 %right 'TYPEOF'
 %nonassoc 'IS'
 %right 'UB_FUNC' 'B_FUNC'
@@ -99,7 +99,7 @@ WrappedExpression:
 ;
 
 Identifier:
-    'NAME'      { $$ = new yy.Identifier($1).pos(@$)}
+    'NAME'      { $$ = new yy.Identifier($1.value).pos(@$)}
 ;
 
 Statement:
@@ -111,9 +111,9 @@ Statement:
 |   ImportStatement
 |   ExportStatement
 |   VariableDeclaration
-|   'BREAK'
-|   'CONTINUE'
-|   Expression              %prec SHIFTER  { $$ = new yy.ExpressionStatement($1).pos(@$)}
+|   'BREAK'                                 { $$ = new yy.BreakStatement().pos(@$)}
+|   'CONTINUE'                              { $$ = new yy.ContinueStatement().pos(@$)}
+|   Expression              %prec SHIFTER   { $$ = new yy.ExpressionStatement($1).pos(@$)}
 ;
 
 ReturnStatement:
@@ -129,20 +129,21 @@ ThrowStatement:
 Continuation:
     'YIELD'                                         { $$ = new yy.YieldExpression(null).pos(@$)}
 |   'YIELD' Expression                              { $$ = new yy.YieldExpression($2).pos(@$)}
+|   'YIELD_FROM' Expression                         { $$ = new yy.YieldExpression($2, true).pos(@$)}
 |   'AWAIT'                                         { $$ = new yy.AwaitExpression(null).pos(@$)}
 |   'AWAIT' Expression                              { $$ = new yy.AwaitExpression($2).pos(@$)}
 ;
 
 String:
-	'RICH_STRING'      { $$ = new yy.StringLiteral($1).pos(@$)}
-|	'RAW_STRING'       { $$ = new yy.RawStringLiteral($1).pos(@$)}
+	'RICH_STRING'      { $$ = new yy.TemplateString($1.value, $1.subtokens).pos(@$)}
+|	'RAW_STRING'       { $$ = new yy.StringLiteral($1.value).pos(@$)}
 |	'RICH_DOC'
 |	'RAW_DOC'
 ;
 
 Number:
-	'FLOAT'  { $$ = new yy.NumberLiteral($1).pos(@$)} 
-|	'INT'    { $$ = new yy.NumberLiteral($1).pos(@$)}
+	'FLOAT'  { $$ = new yy.NumberLiteral($1.value).pos(@$)} 
+|	'INT'    { $$ = new yy.NumberLiteral($1.value).pos(@$)}
 ;
 
 
@@ -388,7 +389,7 @@ ClassLine:
 |   Identifier FunctionExpression                               { $$ = new yy.MethodDefinition($1, $2).pos(@$)}
 |   'GET' Identifier FunctionExpression                         { $$ = new yy.MethodDefinition($2, $3, 'get').pos(@$)}
 |   'SET' Identifier FunctionExpression                         { $$ = new yy.MethodDefinition($2, $3, 'set').pos(@$)}
-|   'STATIC' Identifier FunctionExpression                      { $$ = new yy.MethodDefinition($2, $3, null, true).pos(@$)}
+|   'STATIC' Identifier FunctionExpression                      { $$ = new yy.MethodDefinition($2, $3, 'method', true).pos(@$)}
 |   'STATIC' 'GET' Identifier FunctionExpression                { $$ = new yy.MethodDefinition($3, $4, 'get', true).pos(@$)}
 |   'STATIC' 'SET' Identifier FunctionExpression                { $$ = new yy.MethodDefinition($3, $4, 'set', true).pos(@$)}
 ;
@@ -435,13 +436,13 @@ Operation:
 
 
 LogicalExpression:
-    Expression 'OR' Expression  { $$ = new yy.LogicalExpression('or', $1, $3).pos(@$)}
-|   Expression 'AND' Expression { $$ = new yy.LogicalExpression('and', $1, $3).pos(@$)}
+    Expression 'OR' Expression  { $$ = new yy.LogicalExpression('||', $1, $3).pos(@$)}
+|   Expression 'AND' Expression { $$ = new yy.LogicalExpression('&&', $1, $3).pos(@$)}
 ;
 
 ComparativeExpression:
-    Expression 'COMPARE' Expression                                 { $$ = new yy.ComparativeExpression($2, $1, $3).pos(@$)}
-|   ComparativeExpression COMPARE Expression  %prec CHAIN           { $$ = $1.chain($2, $3).pos(@$)}
+    Expression 'COMPARE' Expression                                 { $$ = new yy.ComparativeExpression($2.value, $1, $3).pos(@$)}
+|   ComparativeExpression COMPARE Expression  %prec CHAIN           { $$ = $1.chain($2.value, $3).pos(@$)}
 ;
 
 BinaryExpression:
@@ -476,9 +477,9 @@ MemberExpression:
 ;
 
 AssignmentExpression:
-    MemberExpression 'ASSIGN' Expression                { $$ = new yy.AssignmentExpression($2, $1, $3).pos(@$)}
-|   Pattern 'ASSIGN' Expression                         { $$ = new yy.AssignmentExpression($2, $1, $3).pos(@$)}
-|   Identifier 'ASSIGN' Expression                      { $$ = new yy.AssignmentExpression($2, $1, $3).pos(@$)}
+    MemberExpression 'ASSIGN' Expression                { $$ = new yy.AssignmentExpression($2.value, $1, $3).pos(@$)}
+|   Pattern 'ASSIGN' Expression                         { $$ = new yy.AssignmentExpression($2.value, $1, $3).pos(@$)}
+|   Identifier 'ASSIGN' Expression                      { $$ = new yy.AssignmentExpression($2.value, $1, $3).pos(@$)}
 ;
 
 CallExpression:
@@ -489,7 +490,7 @@ CallExpression:
 ;
 
 Path:
-    'PATH'
+    'PATH'      { $$ = $1.value}
 ;
 
 ImportListLines:

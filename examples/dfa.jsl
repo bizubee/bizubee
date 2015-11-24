@@ -1,64 +1,284 @@
 
+import {range, tuple} from ./util
+
 const dictionary = new Set([
-    'absolute'
-    'absolve'
-    'abdicate'
-    'insinuate'
+    'abbc'
+    'cbbc'
+    'dbbc'
+    #'dbbc'
 ])
+
+stateGen() -> {
+    var i = 0
+    return () -> {
+        return i then i += 1
+    }
+}
 
 createDFA(wordSet) ->
     const
     ,   alphabet    = new Set() # set of symbols(characters) comprising the language
     ,   table       = new Map() # state transition table
     ,   acceptances = new Map() # to lookup if state is accepting
+    ,   statemap    = new Map() # maps strings to stateNumbers
+    ,   nextState   = stateGen()
+    ,   nullState   = nextState()
+    ,   startState  = stateNum('')
+
+    nullMap() -> {
+        const map = new Map()
+        for c in alphabet
+            map.set(c, nullState)
+        return map
+    }
+
+    stateNum(str) -> {
+        if statemap.has(str)
+            return statemap.get(str)
+        else
+            const state = nextState()
+            statemap.set(str, state)
+            return state
+    }
 
     # returns new state or null if there is no transition state
     transformer(state, symbol) ->
+        if not alphabet.has(symbol)
+            throw new Error("Invalid character '${symbol}'!")
+    
         const transiter = table.get(state)
-        if not transiter.has(symbol)
-            return null
 
         return transiter.get(symbol)
-    
-    
-    evaluate(string) ->
-        var state = ''
-        for c in string
-            state = transformer(state, c)
-            if state == null
-                return false
-        return acceptances.get(state)
-    
-    
+
+    for word in wordSet
+        for c in word
+            alphabet.add(c)
+
     for string in wordSet
         var state = ''
-
         for c in string
             var
             ,   endstates
             ,   endstate    = state + c
+            ,   currentn    = stateNum(state)
+            ,   endn        = stateNum(endstate)
             
-            if not table.has(state)
-                endstates = new Map()
-                table.set(state, endstates)
+            if not table.has(currentn)
+                endstates = nullMap()
+                table.set(currentn, endstates)
             else
-                endstates = table.get(state)
+                endstates = table.get(currentn)
                 
-            endstates.set(c, endstate)
-            alphabet.add(c)
+            endstates.set(c, endn)
             acceptances.set(
-                endstate
+                endn
                 wordSet.has(endstate)
             )
 
             state = endstate
-    
-    return evaluate
+        if not table.has(state)
+            table.set(stateNum(state), nullMap())
 
+    acceptances.set(startState, wordSet.has(startState))
+    acceptances.set(nullState, false)
+    table.set(nullState, nullMap())
+
+    do
+        const
+        ,   states          = new Set()
+        ,   acceptingStates = new Set()
+
+        for [state, accepting] in acceptances
+            states.add(state)
+            if accepting
+                acceptingStates.add(state)
+
+        return tuple(
+            states
+            alphabet
+            transformer
+            startState
+            acceptingStates
+        )
+    
+
+generateGrammar(dfa, ignore = 0) -> {
+    const [
+        states
+        alphabet
+        transiter
+        start
+        acceptingStates
+    ] = dfa
+
+    const
+    ,   rules       = new Map()
+    ,   cache       = new Set()
+    ,   tranTable   = new Map()
+
+    for state in states
+        for c in alphabet
+            const
+            ,   cacheCode = "${state}-${c}"
+            ,   endState  = transiter(state, c)
+
+            if cache.has(cacheCode)
+                continue
+            else
+                cache.add(cacheCode)
+
+            if not rules.has(endState)
+                rules.set(endState, [])
+
+            const
+            ,   productions = rules.get(endState)
+
+            if state == start
+                productions.push("'${c}'")
+            else
+                productions.push("${state} + '${c}'")
+
+    for [state, productions] in rules
+        if state == ignore
+            continue
+
+        if acceptingStates.has(state)
+            console.log("${state}* ->")
+        else
+            console.log("${state}  ->")
+
+        for production in productions
+            console.log("\t${production}")
+        console.log()
+}
+
+simplifyDFA(dfa) -> {
+    const [
+        states
+        alphabet
+        transiter
+        start
+        acceptingStates
+    ] = dfa
+
+    const
+    ,   equivalences        = new Map()
+    ,   minEquivalences     = new Map()
+    ,   newTable            = new Map()
+    ,   simpleTable         = new Map()
+    ,   newStates           = new Set()
+    ,   newAccepting        = new Set()
+
+    setEquivalence(a, b) -> {
+        equivalences.get(a).set(b, true)
+        equivalences.get(b).set(a, true)
+    }
+
+    getEquivalence(a, b) -> {
+        return equivalences.get(a).get(b) or equivalences.get(b).get(a)
+    }
+
+    equivalent(a, b) -> {
+        if getEquivalence(a, b)
+            return true
+        else if acceptingStates.has(a) != acceptingStates.has(b)
+            return false
+        else
+            for c in alphabet
+                const
+                ,   enda = transiter(a, c)
+                ,   endb = transiter(b, c)
+
+
+                if not equivalent(enda, endb)
+                    return false
+
+            setEquivalence(a, b)
+            return true
+    }
+
+    for a in states
+        const map = new Map()
+        equivalences.set(a, map)
+        for b in states
+            if a == b
+                map.set(b, true)
+            else
+                map.set(b, false)
+
+    for a in states
+        for b in states
+            if not a < b
+                continue
+            if equivalent(a, b)
+                setEquivalence(a, b)
+
+    for state in states
+        var max = -1
+        for [equiv, truth] in equivalences.get(state)
+            if not truth
+                continue
+            if equiv > max
+                max = equiv
+        simpleTable.set(state, max)
+
+    for state in states
+        const
+        ,   simple  = simpleTable.get(state)
+        ,   map     = new Map()
+
+        newStates.add(simple)
+        if acceptingStates.has(state)
+            newAccepting.add(simple)
+
+        for c in alphabet
+            const end = transiter(state, c)
+            map.set(c, simpleTable.get(end))
+        newTable.set(simpleTable.get(state), map)
+
+    return tuple(
+        newStates
+        alphabet
+        
+        (state, c) -> {
+            if not alphabet.has(c)
+                throw new Error("Invalid symbol '${c}'!")
+            
+            return newTable.get(state).get(c)
+        }
+
+        simpleTable.get(start)
+        newAccepting
+    )
+}
+
+generateEvaluator(dfa) -> {
+    const [
+        states
+        alphabet
+        transiter
+        start
+        acceptingStates
+    ] = createDFA(dictionary)
+
+    return (str) -> {
+        var state = start
+        for c in str
+            if not alphabet.has(c)
+                return false
+            state = transiter(state, c)
+        return acceptingStates.has(state)
+    }
+}
 
 main(argv) ->
-    const evaluate = createDFA(dictionary)
-    if evaluate(argv[1])
+    const
+    ,   dfa         = createDFA(dictionary)
+    ,   evaluate    = generateEvaluator(dfa) 
+    ,   string      = argv[1]
+    
+    console.log("does '${string}' match?")
+    if evaluate(string)
         console.log('yes')
     else
         console.log('no')
