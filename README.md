@@ -96,7 +96,27 @@ for (let i of range(0, 10)) {
 }
 ```
 
-C style for loops and JS for-in loops have no special syntactic support, as the C-style for loops are just down right ugly and provide little advantage over while-loops, and there is the `keys`, and `keyvals` generator functions from the standard library to iterate over object keys in Bizubee's for-in loop, which makes syntax level support for this feature unnecessary.
+C style for loops and JS for-in loops have no special syntactic support, however the `keys` function from the "bizubee lib" library iterates over the keys of the object.
+
+```js
+
+import {keys} from bizubee lib
+
+const myObject = {
+	a: 1
+	b: 4
+}
+
+for key in keys(myObject)
+	console.log(key)
+```
+
+Produces
+
+```
+a
+b
+```
 
 For-on loops are the async equivalent of for-in loops. Whereas a for-in loop iterates over an iterator, a for-on loop using similar syntax iterates over an async-iterator. Async-iterators are useful for iterating over async sequences of data
 
