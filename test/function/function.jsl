@@ -114,3 +114,12 @@ test('Function declaration bubbles to top of scope', (api) -> {
 		return a ^ a
 	}
 })
+
+test('Empty function', (api) -> {
+	a() -> {
+		
+	}
+	
+	api.eq(a(), undefined)
+	api.done()
+})

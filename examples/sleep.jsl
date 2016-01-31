@@ -23,7 +23,7 @@ main() -> ~ {
         }
         500
     )
-    
+
     for passed on ticker(20)
         console.log(passed)
     clearInterval(pulser)

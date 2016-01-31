@@ -1,0 +1,41 @@
+
+test('Basic object destructuring', (api) -> {
+    const obj = {
+        a : 2
+        b : 9
+    }
+    
+    try
+        const {a, b} = obj
+        api.eq(a, 2)
+        api.eq(b, 9)
+        api.done()
+    catch e
+        api.fail()
+})
+
+test('Basic iterable destructuring', (api) -> {
+    const obj = [3, 7]
+    
+    try
+        const [a, b] = obj
+        api.eq(a, 3)
+        api.eq(b, 7)
+        api.done()
+    catch e
+        api.fail()
+})
+
+
+test('Iterable destructuring with nested object', (api) -> {
+    const obj = [3, {b : 4, c : 11}]
+    
+    try
+        const [a, {b, c}] = obj
+        api.eq(a, 3)
+        api.eq(b, 4)
+        api.eq(c, 11)
+        api.done()
+    catch e
+        api.fail()
+})

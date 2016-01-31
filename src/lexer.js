@@ -559,11 +559,13 @@ filters.push(function* (gen) {
 {
 	const precedeOp = new Set([
 		'NAME',
+		'SUPER',
 		'THIS',
 		'@',
 		'BLOCK_RIGHT',
 		'INDEX_RIGHT',
 		'CALL_RIGHT',
+		'?',
 		')',
 		'}',
 		']'
@@ -915,6 +917,33 @@ filters.push(function* (gen) {
 			prev = token.tag;	
 		}
 	});
+}
+
+{
+	// distiguishes between '?'s before call parens or index brackets
+	filters.push(function*(gen) {
+		gen = pgen(gen);
+		for (let token of gen) {
+			if (token.tag === '?') {
+				const next = gen.peek();
+				if (!!next.value) {
+					if (next.value.tag === 'ACCESS') {
+						token.tag = 'Q_ACCESS';
+					}
+					if (next.value.tag === 'CALL_LEFT') {
+						token.tag = 'Q_CALL';
+					}
+					
+					if (next.value.tag === 'INDEX_LEFT') {
+						token.tag = 'Q_INDEX';
+					}
+				}
+			}
+			
+			yield token;
+		}
+	});
+
 }
 
 exports.parseCharSrc = function(csrc) {

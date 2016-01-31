@@ -287,6 +287,10 @@ export class FunctionExpression extends Expression {
 	}
 }
 
+export class Super extends Node {
+	
+}
+
 export class ClassExpression extends Expression {
 	constructor(id = null, superClass = null, body = []) {
 		super();

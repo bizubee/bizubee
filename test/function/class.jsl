@@ -82,3 +82,59 @@ test('Class with static async method', (api) -> {
         api.done()
     })
 })
+
+test('Simple inheritance', (api) -> {
+    class a {
+        constructor(b) -> {
+            @prop = b + 3
+        }
+    }
+    
+    class c extends a {
+        constructor(b) -> {
+            super(4)
+            @prop += b
+        }
+    }
+    
+    const
+    ,   d = new a(2)
+    ,   e = new c(3)
+    
+    api.eq(d.prop, 5)
+    api.eq(e.prop, 10)
+    api.done()
+})
+
+test('Overridden methods', (api) -> {
+    class a {
+        constructor(arg1, arg2) -> {
+            @prop = arg1 + arg2
+        }
+        
+        multiply(arg1, arg2) -> {
+            return arg1 * arg2
+        }
+    }
+    
+    class b extends a {
+        constructor(arg1, arg2) -> {
+            super(arg1, arg2)
+            @prop += super.multiply(arg1, arg2)
+            @prop2 = @multiply(arg1, arg2)
+        }
+        
+        multiply(arg1, arg2) -> {
+            return arg1 * arg2 * arg1
+        }
+    }
+    
+    const
+    ,   c = new a(2, 5)
+    ,   d = new b(2, 5)
+    
+    api.eq(c.prop, 7)
+    api.eq(d.prop, 17)
+    api.eq(d.prop2, 20)
+    api.done()
+})

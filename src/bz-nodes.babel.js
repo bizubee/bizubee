@@ -17,6 +17,7 @@ const OKEY = Symbol('Options key');
 const IGNORE = Symbol('Ingorable properties');
 
 const EMPTY = new js.EmptyStatement();
+const LIB_PATH = "bizubee lib";
 
 const binaryOperator = new Set([
     "==",
@@ -346,6 +347,17 @@ function getJSConditional(identifier, def) {
     }
 }
 
+function iife(statements) {
+    return new js.CallExpression(
+        new js.FunctionExpression(
+            null,
+            [],
+            new js.BlockStatement(statements)
+            ),
+        []
+        );
+}
+
 export function wrap(node) {
     if (node instanceof BlockStatement) {
         return node;
@@ -370,6 +382,12 @@ export class Node {
         return this
         .getParentScope()
         .getOpvars(n);
+    }
+
+    freeOpvars(opvars) {
+        return this
+        .getParentScope()
+        .freeOpvars(opvars);
     }
 
     onASTBuild(e = {}) {
@@ -554,24 +572,41 @@ export class Scope extends Node {
         
         this.body = statements;
         this._opvars = [];
+        this._forbiddenvars = new Set();
         this._funcDeclarations = new Map();
     }
 
     getOpvars(n) {
-       let arr = new Array(n), i = 0;
-       for (let i = 0; i < n; i++) {
-            if (this._opvars.length === i)
-                this._opvars.push(nuVar('op'));
-            
-            arr[i] = this._opvars[i];
-       }
-       
-       return arr;
+        let arr = [], i = 0;
+        
+        while (arr.length < n) {
+            if (i < this._opvars.length) {
+                let opvar = this._opvars[i];
+                if (!this._forbiddenvars.has(opvar)) {
+                    arr.push(opvar);
+                    this._forbiddenvars.add(opvar);
+                }
+            } else {
+                let opvar = nuVar('opvar');
+                this._opvars.push(opvar);
+                arr.push(opvar);
+                this._forbiddenvars.add(opvar);
+            }
+            i++;
+        }
+        
+        return arr;
+    }
+    
+    freeOpvars(opvars) {
+        for (var opvar of opvars) {
+            this._forbiddenvars.delete(opvar);
+        }
     }
 
     getOpvarsDeclaration() {
         let identifiers = 
-            this.getOpvars(this._opvars.length)
+            this._opvars
                 .map(id => new js.Identifier(id));
         return new js.VariableDeclaration(identifiers, 'let');
     }
@@ -643,6 +678,11 @@ export class Scope extends Node {
             } else if (nodes instanceof js.Expression || nodes instanceof js.Statement) {
                 yield statement(nodes);
             } else {
+                if (nodes instanceof js.Super) {
+                    yield nodes;
+                    continue;
+                }
+                
                 line.error(`Invalid object ${typeof nodes}!`);
             }
         }
@@ -662,6 +702,10 @@ export class Program extends Scope {
     }
     
     resolve(path) {
+        if (path === LIB_PATH) {
+            return path;
+        }
+        
         const dir     = pathlib.dirname(this.filename);
         return pathlib.resolve(dir, `${path}.${ext}`);
     }
@@ -670,6 +714,9 @@ export class Program extends Scope {
         const parser = require('./parser');
         for (var statement of this.body) {
             if (statement instanceof ImportStatement) {
+                if (statement.path === LIB_PATH) {
+                    continue;
+                }
                 const abspath   = `${pathlib.resolve(dir, statement.path)}.${ext}`;
                 if (cache.has(abspath)) {
                     continue;
@@ -698,6 +745,8 @@ export class Program extends Scope {
         const directives        = [
         ];
         
+        getLibn(LIB_PATH);
+        
         for (let [abspath, program] of
             this.getImports(pathlib.dirname(this.filename), cache)) {
                 
@@ -706,6 +755,7 @@ export class Program extends Scope {
         }
         EXP = nuVar('exports');
         LIB = nuVar('bzbSupportLib');
+        
         
         instructions.push(getJSDeclare(
             new js.Identifier(LIB),
@@ -718,12 +768,20 @@ export class Program extends Scope {
             ));
 
         for (var [key, mod] of modmap) {
-            modules.push(
-                new js.Property(
-                    new js.Literal('' + key),
-                    mod.toJS(o)
-                    )
-                );   
+            if (mod === null) 
+                modules.push(
+                    new js.Property(
+                        new js.Literal('' + key),
+                        new js.Identifier(LIB)
+                        )
+                    );
+            else
+                modules.push(
+                    new js.Property(
+                        new js.Literal('' + key),
+                        mod.toJS(o)
+                        )
+                    );   
         }
         
         instructions.push(statement(getJSMethodCall(
@@ -741,7 +799,16 @@ export class Program extends Scope {
         if (this._opvars.length > 0)
             directives.unshift(this.getOpvarsDeclaration());
 
-        return new js.BlockStatement([...instructions, new js.BlockStatement(directives)]);
+        return new js.Program([
+            new js.ExpressionStatement(
+                iife(
+                    [
+                        ...instructions,
+                        new js.BlockStatement(directives)
+                    ]
+                    )
+                )
+        ]);
     }
     
     compileBrowserModule(o) {
@@ -768,7 +835,7 @@ export class Program extends Scope {
         EXP = nuVar('moduleExports');
         var instructions = statement([
             new js.Literal("use strict"),
-            getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal('bizubee lib')]), 'const'),
+            getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal(LIB_PATH)]), 'const'),
             getJSDeclare(new js.Identifier(EXP, false), getJSMethodCall([LIB, 'module'], [])),
             EMPTY,
             EMPTY,
@@ -1382,34 +1449,41 @@ export class ArrayPattern extends Pattern {
         }
     }
 
+
+    // extracts the individual extract or assign statements from an array pattern
     * extractAssigns(target, declare=true, def = null) {
-        let itervar = nuVar('iterator');
+        let
+        itervar = nuVar('iterator'),
+        nextval = new js.MemberExpression(
+            getJSMethodCall([itervar, 'next'], []),
+            new js.Identifier('value')
+        );
+        
         if (declare) yield new js.VariableDeclarator(new js.Identifier(itervar), getJSIterable(target));
         else yield new js.AssignmentExpression('=', new js.Identifier(itervar), getJSIterable(target));
         for (let pattern of this.patterns) {
             if (pattern instanceof Identifier) {
-                if (declare) yield new js.VariableDeclarator(
-                    pattern,
-                    new js.MemberExpression(
-                        getJSMethodCall([itervar, 'next'], []),
-                        new js.Identifier('value')
-                        )
-                    );
-                else yield new js.AssignmentExpression(
-                    '=',
-                    pattern,
-                    new js.MemberExpression(
-                        getJSMethodCall([itervar, 'next'], []),
-                        new js.Identifier('value'))
-                    );
+                if (declare) yield new js.VariableDeclarator(pattern, nextval);
+                else yield new js.AssignmentExpression('=', pattern, nextval);
             } else if (
                 pattern instanceof ArrayPattern ||
                 pattern instanceof ObjectPattern) {
+                    
+                var identifier;
+                if (declare) {
+                    identifier = new js.Identifier(nuVar('ph'));
+                    yield new js.VariableDeclarator(identifier, nextval);
+                } else {
+                    const [name] = this.getOpvars(1);
+                    const identifier = new js.Identifier(name);
+                    yield new js.AssignmentExpression('=', identifier, nextval);
+                }
 
-                yield* pattern.extractAssigns(new js.MemberExpression(
-                        getJSMethodCall([itervar, 'next'], []),
-                        new js.Identifier('value'))
-                    ,declare);
+                yield* pattern.extractAssigns(identifier, declare);
+                
+                if (!declare) {
+                    this.freeOpvars([identifier.name]);
+                }
             } else {
                 pattern.error('Invalid pattern for assignment type!');
             }
@@ -1494,6 +1568,11 @@ export class DefaultPattern extends Pattern {
     }
 }
 
+export class Super extends Statement {
+    _toJS(o) {
+        return new js.Super();
+    }
+}
 
 export class ClassExpression extends Expression {
 	constructor(id = null, superClass = null, body = []) {
@@ -1613,7 +1692,8 @@ export class ClassProperty extends Node {
     _toJS(o) {
         return new js.Property(
             this.key.toJS(o),
-            this.value.toJS(o)
+            this.value.toJS(o),
+            this.computed
             );
     }
 }
@@ -2132,25 +2212,42 @@ export class LogicalExpression extends Expression {
 
 
 export class CallExpression extends Expression {
-    constructor(callee, args, isNew = false) {
+    constructor(callee, args, isNew = false, doubtful = false) {
         super();
         setParent([callee, args], this);
 
         this.callee = callee;
         this.arguments = args;
         this.isNew = isNew;
+        this.doubtful = doubtful;
     }
 
     _toJS(o) {
-        var args = [], callee = this.callee.toJS(o);
+        var
+        args = [],
+        callee = this.callee.toJS(o),
+        ctor = this.isNew ? js.NewExpression : js.CallExpression;
+        
         for (var argument of this.arguments) {
             args.push(argument.toJS(o));
         }
         
-        if (this.isNew) {
-            return new js.NewExpression(callee, args);
+        if (this.doubtful) {
+            let [opvar] = this.getOpvars(1);
+            let left    = getJSAssign(opvar, callee);
+            let undie   = new js.Identifier('undefined');
+            
+            let node    = new js.ConditionalExpression(
+                new js.BinaryExpression('===', left, undie),
+                undie,
+                new ctor(left.left, args)
+                );
+            
+            
+            this.freeOpvars([opvar]);
+            return node;
         } else {
-            return new js.CallExpression(callee, args);
+            return new ctor(callee, args);            
         }
     }
 }
@@ -2160,19 +2257,54 @@ export class NewExpression extends CallExpression {
 }
 
 export class MemberExpression extends Expression {
-    constructor(object, property, computed = false) {
+    // doubtful parameter is true if there there are question marks involved
+    constructor(object, property, computed = false, doubtful = false) {
         super();
         setParent([object, property], this);
 
         this.object = object;
         this.property = property;
         this.computed = computed;
+        this.doubtful = doubtful;
     }
 
     _toJS(o) {
-        let object = this.object.toJS(o);
-        let right = this.property.toJS(o);
-        return new js.MemberExpression(object, right, this.computed);
+        if (!this.doubtful) {
+            let object = this.object.toJS(o);
+            let right = this.property.toJS(o);
+            return new js.MemberExpression(object, right, this.computed);
+        } else {
+            let [opvar] = this.getOpvars(1);
+            let left    = getJSAssign(opvar, this.object.toJS(o));
+            let undie   = new js.Identifier('undefined');
+            
+            let node    = new js.ConditionalExpression(
+                new js.BinaryExpression('===', left, undie),
+                undie,
+                new js.MemberExpression(left.left, this.property.toJS(o), this.computed)
+                );
+            
+            
+            this.freeOpvars([opvar]);
+            return node;
+        }
+    }
+}
+
+export class DefinedExpression extends Expression {
+    constructor(expression) {
+        super();
+        setParent(expression, this);
+        
+        this.expression = expression;
+    }
+    
+    _toJS(o) {
+        return new js.BinaryExpression(
+            '!==',
+            this.expression.toJS(o),
+            new js.Identifier('undefined')
+            );
     }
 }
 
@@ -2408,7 +2540,7 @@ export class ImportStatement extends Statement {
                 new js.Literal(this.path)
             ]);            
         } else {
-            return getJSMethodCall(['require'], new js.Literal(this.path));
+            return getJSMethodCall(['require'], [new js.Literal(this.path)]);
         }
     }
 
@@ -2550,7 +2682,23 @@ export class ExportStatement extends Statement {
                     }
                 }
             } else {
-                let list = [this.target.toJS(o)];
+                let list = [];
+                if (this.target instanceof FunctionDeclaration) {
+                    const scope = this.getParentScope();
+                    const name = this.target.identifier.name;
+                    
+                    if (scope._funcDeclarations.has(name)) {
+                        this.target.error('Cannot declare function more than once!');
+                    }
+                    
+                    scope._funcDeclarations.set(
+                        name,
+                        this.target.func.toJS(o)
+                        );
+                } else {
+                    list.push(this.target.toJS(o))   
+                }
+                
                 for (let name of this.target.extractVariables()) {
                     let left = getJSMemberExpression([EXP, name]);
                     let right = new js.Identifier(name);

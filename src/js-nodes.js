@@ -318,6 +318,10 @@ class FunctionExpression extends Expression {
 
 exports.FunctionExpression = FunctionExpression;
 
+class Super extends Node {}
+
+exports.Super = Super;
+
 class ClassExpression extends Expression {
 	constructor() {
 		var id = arguments.length <= 0 || arguments[0] === undefined ? null : arguments[0];

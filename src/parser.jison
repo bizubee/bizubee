@@ -31,6 +31,7 @@
 %left 'OR' 'AND'
 %right '!'
 %left 'COMPARE'
+%left '?'
 
 %left '+' '-' '&'
 %left '*' '//' '%' '/'
@@ -41,14 +42,17 @@
 %nonassoc 'IS'
 %right 'UB_FUNC' 'B_FUNC'
 
+%right 'Q_ACCESS'
 %right 'ACCESS'
 
+%nonassoc 'Q_INDEX'
 %nonassoc 'INDEX_LEFT' 'INDEX_RIGHT'
 
 %right 'NEW'
 
 %nonassoc SUBCALL
 
+%left 'Q_CALL'
 %left 'CALL_LEFT' 'CALL_RIGHT'
 
 %nonassoc '(' ')'
@@ -64,10 +68,17 @@ Program:
 |   'ENDLN' Lines EOF       { return new yy.Program($2).pos(@$)}
 ;
 
+Line:
+    Super
+|   ImportStatement
+|   ExportStatement
+|   Statement
+;
+
 Lines:
-    Statement                { $$ = [$1]}
-|   Lines ';' Statement      { $$ = $1.concat($3)}
-|   Lines 'ENDLN' Statement  { $$ = $1.concat($3)}
+    Line                        { $$ = [$1]}
+|   Lines ';' Line              { $$ = $1.concat($3)}
+|   Lines 'ENDLN' Line          { $$ = $1.concat($3)}
 ;
 
 Expression:
@@ -108,8 +119,6 @@ Statement:
 |   BlockableStatement
 |   FunctionDeclaration
 |   ClassDeclaration
-|   ImportStatement
-|   ExportStatement
 |   VariableDeclaration
 |   'BREAK'                                 { $$ = new yy.BreakStatement().pos(@$)}
 |   'CONTINUE'                              { $$ = new yy.ContinueStatement().pos(@$)}
@@ -142,8 +151,9 @@ String:
 ;
 
 Number:
-	'FLOAT'  { $$ = new yy.NumberLiteral($1.value).pos(@$)} 
-|	'INT'    { $$ = new yy.NumberLiteral($1.value).pos(@$)}
+	'FLOAT' { $$ = new yy.NumberLiteral($1.value).pos(@$)} 
+|	'INT'   { $$ = new yy.NumberLiteral($1.value).pos(@$)}
+|   'HEX'   { $$ = new yy.NumberLiteral($1.value).pos(@$)}
 ;
 
 
@@ -167,6 +177,7 @@ BlockStatement:
             else $$ = new yy.BlockStatement([$2]).pos(@$);
         }
 |   'BLOCK_LEFT' Lines 'BLOCK_RIGHT'            { $$ = new yy.BlockStatement($2).pos(@$)}
+|   'BLOCK_LEFT' 'BLOCK_RIGHT'                  { $$ = new yy.BlockStatement([]).pos(@$)}
 ;
 
 IfStatement:
@@ -219,7 +230,7 @@ Property:
     Identifier                         
 |   Identifier          ':' Expression  { $$ = new yy.Property($1, $3).pos(@$)}
 |   String              ':' Expression  { $$ = new yy.Property($1, $3).pos(@$)}
-|   WrappedExpression   ':' Expression  { $$ = new yy.Property($2, $5).pos(@$)}
+|   '[' Expression ']'  ':' Expression  { $$ = new yy.Property($2, $5).pos(@$)}
 ;
 
 Properties:
@@ -371,7 +382,9 @@ FunctionExpression:
 
 
 
-
+Super:
+    'SUPER'     { $$ = new yy.Super().pos(@$)}
+;
 
 
 ClassExpressionHeader:
@@ -462,18 +475,19 @@ UnaryExpression:
 |   '+' Expression      %prec UPLUS     { $$ = new yy.UnaryExpression('+', $2).pos(@$)}
 |   '!' Expression                      { $$ = new yy.UnaryExpression('!', $2).pos(@$)}
 |   'NOT' Expression                    { $$ = new yy.UnaryExpression('!', $2).pos(@$)}
+|   Expression '?'                      { $$ = new yy.DefinedExpression($1).pos(@$)}
 ;
 
-Arguments:
-    'CALL_LEFT' ExpressionLines 'CALL_RIGHT'    { $$ = $2}
-|   'CALL_LEFT' 'CALL_RIGHT'                    { $$ = []}
-;
 
 
 MemberExpression:
-    Expression 'INDEX_LEFT' Expression 'INDEX_RIGHT'    { $$ = new yy.MemberExpression($1, $3, true).pos(@$)}
-|   Expression 'ACCESS' Identifier                      { $$ = new yy.MemberExpression($1, $3).pos(@$)}
-|   '@' 'Identifier'                                    { $$ = new yy.MemberExpression(new yy.ThisExpression().pos(@1), $2).pos(@$)}
+    Expression 'INDEX_LEFT' Expression 'INDEX_RIGHT'            { $$ = new yy.MemberExpression($1, $3, true).pos(@$)}
+|   Super 'INDEX_LEFT' Expression 'INDEX_RIGHT'                 { $$ = new yy.MemberExpression($1, $3, true).pos(@$)}
+|   Expression 'ACCESS' Identifier                              { $$ = new yy.MemberExpression($1, $3).pos(@$)}
+|   Super 'ACCESS' Identifier                              { $$ = new yy.MemberExpression($1, $3).pos(@$)}
+|   Expression 'Q_INDEX' 'INDEX_LEFT' Expression 'INDEX_RIGHT'  { $$ = new yy.MemberExpression($1, $4, true, true).pos(@$)}
+|   Expression 'Q_ACCESS' 'ACCESS' Identifier                   { $$ = new yy.MemberExpression($1, $4, false, true).pos(@$)}
+|   '@' 'Identifier'                                            { $$ = new yy.MemberExpression(new yy.ThisExpression().pos(@1), $2).pos(@$)}
 ;
 
 AssignmentExpression:
@@ -482,11 +496,22 @@ AssignmentExpression:
 |   Identifier 'ASSIGN' Expression                      { $$ = new yy.AssignmentExpression($2.value, $1, $3).pos(@$)}
 ;
 
+Arguments:
+    'CALL_LEFT' ExpressionLines 'CALL_RIGHT'    { $$ = $2}
+|   'CALL_LEFT' 'CALL_RIGHT'                    { $$ = []}
+;
+
+
 CallExpression:
-    Expression Arguments                    { $$ = new yy.CallExpression($1, $2).pos(@$)}
-|   'NEW' MemberExpression Arguments        { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
-|   'NEW' Identifier Arguments              { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
-|   'NEW' WrappedExpression Arguments       { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
+    Expression Arguments                            { $$ = new yy.CallExpression($1, $2, false).pos(@$)}
+|   Super Arguments                                 { $$ = new yy.CallExpression($1, $2, false).pos(@$)}
+|   Expression 'Q_CALL' Arguments                   { $$ = new yy.CallExpression($1, $3, false, true).pos(@$)}
+|   'NEW' MemberExpression Arguments                { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
+|   'NEW' MemberExpression 'Q_CALL' Arguments       { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
+|   'NEW' Identifier Arguments                      { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
+|   'NEW' Identifier 'Q_CALL' Arguments             { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
+|   'NEW' WrappedExpression Arguments               { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
+|   'NEW' WrappedExpression 'Q_CALL' Arguments      { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
 ;
 
 Path:

@@ -47,7 +47,6 @@ const JSL_KW = new Set([
 	"isnt",
 	"not",
 	"from",
-	"pass",
 	"as",
 	"and",
 	"or",
@@ -210,7 +209,7 @@ const total = [
 		tag: 'INT'
 	},
 	{
-		pattern: /[0-9]*\.[0-9]+([eE][\-\+]?[0-9]+)/,
+		pattern: /[0-9]*\.[0-9]+([eE][\-\+]?[0-9]+)?/,
 		tag: 'FLOAT'
 	},
 	{
@@ -222,7 +221,7 @@ const total = [
 		tag: 'BINARY'
 	},
 	{
-		pattern: /0x[A-f0-9]/,
+		pattern: /0x[A-Fa-f0-9]+/,
 		tag: 'HEX'
 	},
 	{
@@ -274,6 +273,8 @@ const total = [
 		pattern: 'yield*',
 		tag: 'YIELD_FROM'
 	},
+	{pattern: '!'},
+	{pattern: '?'},
 	{pattern: ':'},
 	{pattern: ','},
 	{pattern: "*"},
@@ -469,7 +470,6 @@ function* getTokensFromCursor(cursor) {
 		ended = cursor.end();
 
 		token += c;
-
 		match = findMatch(token, trail, prevmatch);
 
 		if (ended) {
@@ -485,6 +485,7 @@ function* getTokensFromCursor(cursor) {
 
 		if (match === null) {
 			if (prevmatch !== null) {
+				
 				stress++;
 				if (stress === threshold || ended){
 					while (stress > 0) {

@@ -16,6 +16,10 @@ exports.extension = ext;
 
 // bastardized version of require that works directly with bizubee files
 support.require = function(dirpath, file) {
+	if (file === 'bizubee lib') {
+		return support;
+	}
+	
 	let abspath = path.resolve(`${dirpath}/${file}`);	// absolute path
 
 	if (cache.has(abspath)) {
@@ -82,7 +86,6 @@ function createContext(filename, ctxt) {
 
 	    ctx.require = function(mod) {
 		    if (mod === 'bizubee lib') {
-		    	
 		        return support;
 		    }
 
@@ -106,6 +109,7 @@ exports.module = function() {
 }
 
 function runFileInNewContext(filepath, ctxt) {
+	
     let abspath         = path.resolve(filepath);
 	let basename 	    = path.basename(abspath);
 	let dirname	        = path.dirname(abspath);

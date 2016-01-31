@@ -3,7 +3,7 @@
     
     const symbols = {
         observer: Symbol('Observer symbol'),
-        export: Symbol('Export symbol')
+        default: Symbol('Default symbol')
     };
     
     const returnVal = function(val) {
@@ -147,8 +147,17 @@
         	}
         	
         	return cls;
+        },
+        * keys(obj) {
+            for (var key in obj) {
+                if (obj.hasOwnProperty(key)) {
+                    yield key;
+                }    
+            }
         }
     }
+    
+    api[symbols.default] = api;
     
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
@@ -161,6 +170,10 @@
             modules = mdls;
         };
         api.require = function(n) {
+            if (n === 0) {
+                return api;
+            }
+            
             if (modules.hasOwnProperty(n)) {
                 if (modcache.has(n)) {
                     return modcache.get(n);
