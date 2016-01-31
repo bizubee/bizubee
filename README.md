@@ -1,19 +1,21 @@
 # Bizubee 
 
-The philosophy behind Bizubee is to have a language that preserved JavaScript semantics, while simultaneously simplifying and extending JS. Bizubee syntax is very much inspired by CoffeeScript though the semantics differ significanty.  Unlike CoffeeScript, the Bizubee compiler targets modern JavaScript (currently ES2015), since transpilers like Traceur can further transpile for support in legacy browsers.
+The philosophy behind Bizubee is to have a language that preserves JavaScript semantics, while simultaneously simplifying and extending JS. Bizubee syntax is very much inspired by CoffeeScript, though the semantics differ significanty.  Unlike CoffeeScript, the Bizubee compiler targets modern JavaScript (currently ES2015), since transpilers like Traceur can further transpile for support in legacy browsers.
 
 Additions and deviations from JS:
 
 ## Line Breaks
-In JS, line breaks are for all practical purposes ignored (it's more complicated), whereas in Bizubee, line breaks signify a new line unless they are found adjacent to binary operators and other special cases. This means semicolons are unnecessary, but still usable in Bizubee. So the following JS if statement
+Whereas in JS line breaks without semicolons lead to strange behavior, in Bizubee line breaks signify a new line unless they are found adjacent to binary operators and other special cases. This means semicolons are unnecessary, but still usable in Bizubee. So the following JS if statement
 ```js
+
 console.log("a is greater than b!");
 console.log("a is greater than b again!");
 ```
 
-would be written as
+can be written as
 
 ```js
+
 console.log("Hello,")
 console.log("World!")
 ```
@@ -23,14 +25,16 @@ in Bizubee
 ## No Unnecessary Parentheses
 In JS an `if` statement requires parentheses around the boolean expression, but in Bizubee
 ```js
+
 if (a > b) {
 	console.log("a is greater than b")
 }
 ```
 
-is written as
+can be written as
 
 ```js
+
 if a > b {
 	console.log("a is greater than b")
 }
@@ -38,9 +42,10 @@ if a > b {
 
 Note that since the conditional is an expression it can still be wrapped in parentheses in Bizubee.
 
-or a try-catch statement from JS that would be written as
+Similarly, a try-catch statement from JS that would be written as
 
 ```js
+
 try {
 	doSomethingRisky();
 } catch (e) {
@@ -50,6 +55,7 @@ try {
 is instead written as
 
 ```js
+
 try {
 	doSomethingRisky()
 } catch e {
@@ -57,11 +63,13 @@ try {
 }
 ```
 
+The parentheses are also omitted from for-loops and while-loops.
 
 ## Optional Indentation
 `try-catch`, `if-else`,  function blocks and other similar code blocks can use either curly brackets or indentation as block delimiters. For example in Bizubee
 
 ```js
+
 if a > b {
 	console.log("a is greater than b")
 } else {
@@ -72,6 +80,7 @@ if a > b {
 is equivalent to
 
 ```js
+
 if a > b
 	console.log("a is greater than b")
 else
@@ -84,6 +93,7 @@ In a curly bracketed block indentation is ignored, though line breaks are still 
 The semantics of `for` loops in Bizubee differs significantly from JS For loops. There are only two types of for loops, for-in loops and for-on loops. The for-in loop is equivalent to the for-of loop in modern JS (as of ES2015). So
 
 ```js
+
 for i in range(0, 10) {
 	console.log("i is now ${i}")
 }
@@ -92,6 +102,7 @@ for i in range(0, 10) {
 is equivalent to the folowing in JS
 
 ```js
+
 // Note that this code uses ES2015 JS features
 for (let i of range(0, 10)) {
 	console.log(`i is now ${i}`);
@@ -123,6 +134,7 @@ b
 For-on loops are the async equivalent of for-in loops. Whereas a for-in loop iterates over an iterator, a for-on loop iterates over an async-iterable. Async-iterables are useful for iterating over async sequences of data.
 
 ```js
+
 for packet on tcpConnection {
 	processPacket(packet)
 }
@@ -133,6 +145,7 @@ for packet on tcpConnection {
 Bizubee functions come in 8 flavors, but the simplest function for is defined as
 
 ```coffee
+
 const divide = (numerator, denominator) -> {
 	return numerator / denominator
 }
@@ -141,6 +154,7 @@ const divide = (numerator, denominator) -> {
 whereas in JS this would be
 
 ```js
+
 const divide = function(numerator, denominator) {
 	return numerator / denominator;
 };
@@ -149,6 +163,7 @@ const divide = function(numerator, denominator) {
 Just like Coffeescript (and ES2015 JS) there is also a fat arrow function type in Bizubee
 
 ```js
+
 @numerator = 5
 @denominator = 10
 const myDivide = () => {
@@ -161,6 +176,7 @@ which works just like in Coffeescript (and now JavaScript!), by preserving the `
 Just like ES2015, Bizubee has support for generator functions. A function is turned into a generator function by adding an asterix after the function's arrow (`->` or `=>`) as in
 
 ```js
+
 const range = (start, end) -> * {
 	var i = start
 	while i != end {
@@ -175,6 +191,7 @@ Bizubee also supports async functions using a `~` after the function's arrow.
 An async function that fetches some html via HTTP and returns it parsed might look like
 
 ```js
+
 const getHTMLTree = (url) -> ~ {
 	var string = await getStringFromUrl(url)
 	return parseHTML(string)
@@ -186,6 +203,7 @@ The `await` operator works on any object following the Promise/A+ spec. When `aw
 The 3rd function variation is the async-generator, a function is defined as an async generator by placing a `~*` to the right of the arrow, for example one could write an async generator that reads stock valuations for some company, and yields changes.
 
 ```js
+
 const getStockPriceChanges = (company)-> ~* {
 	var previous
 	var priceURL = "${baseURL}?company=${company}"
@@ -200,13 +218,15 @@ const getStockPriceChanges = (company)-> ~* {
 Calling an async-generator returns an async iterator, this means one can iterate over the price changes above with a for-on loop
 
 ```js
+
 for change on getStockPriceChanges('AOL')
 	doSomethingWithChange(change)
 ```
 
 Note that for-on loops can only exist within async functions, in fact the above example is just sugar over 
 
-```coffee
+```js
+
 const asyncIterator = getStockPriceChanges('AOL')
 while true
 	const controller = await asyncIterator.next()
@@ -229,6 +249,7 @@ Module semantics in bizubee is an ever expanding subset of the ES2015 module spe
 Variable and constant declarations, function, and class declarations can be exported with their values also being accessible in the current file.
 
 ```coffee
+
 export var a = 1, b = 4		# exports names a and b
 export const c = 3, d = 5	# exports names c and d
 
@@ -249,6 +270,7 @@ console.log(someFunc()) # prints 8 cause names are accessible in file too
 One can also export names explicitly
 
 ```coffee
+
 var a = 1, b = 4
 const c = 3, d = 5
 
@@ -265,6 +287,7 @@ export {a, b, c, d, someFunc} # exports names of all variables declared
 One can optionally set the default value of the export, if no value is provided, a module object with all the names as properties is exported as the default value
 
 ```coffee
+
 export var 1 = 5
 
 export func() -> {
@@ -281,6 +304,7 @@ export default () -> {		# default value for export
 Exported values can be accessed in the following manner
 
 ```coffee
+
 # import names from someFile
 import {a, b} from ./someFile	# if we export a, b from file 'someFile'
 
@@ -301,6 +325,7 @@ Note that `./someFile` is imported multiple times, but the file is evaluated onl
 ## Usage
 
 ```
+
 	$ bizubee -c bizubee/file/path.jsl 		# to compile file
 	$ bizubee bizubee/file/path.jsl                 # to execute file
 	$ bizubee bizubee/file/path.jsl <arguments>     # to execute file with arguments
@@ -310,6 +335,7 @@ Note that `./someFile` is imported multiple times, but the file is evaluated onl
 
 ### Options
 ```
+
     -c,	--compile   	Compile bisubee file and all dependencies into single file
 	-t,	--target    	Specify target for file compilation output (defaults to <filename>.js)
 	-m,	--mapfile   	Specify custom mapfile name when compiling
