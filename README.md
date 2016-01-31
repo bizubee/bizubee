@@ -1,9 +1,11 @@
-# Bizubee Syntax
+# Bizubee 
 
-The philosophy behind Bizubee is to have a language that preserved javascript semantics, while simultaneously simplifying and extending the JS. Bizubee syntax is very much inspired by CoffeeScript though the semantics differ significanty.  Here is a walk through the language
+The philosophy behind Bizubee is to have a language that preserved JavaScript semantics, while simultaneously simplifying and extending JS. Bizubee syntax is very much inspired by CoffeeScript though the semantics differ significanty.  Unlike CoffeeScript, the Bizubee compiler targets modern JavaScript (currently ES2015), since transpilers like Traceur can further transpile for support in legacy browsers.
 
-##Significan Line Breaks
-In JS line breaks are for all practical purposes ignored (it's more complicated), whereas in Bizubee, line breaks signify a new line unless they are found adjacent to binary operators and other special cases. This means semicolons are unnecessary, but still usable in Bizubee. So the following JS if statement
+Additions and deviations from JS:
+
+## Line Breaks
+In JS, line breaks are for all practical purposes ignored (it's more complicated), whereas in Bizubee, line breaks signify a new line unless they are found adjacent to binary operators and other special cases. This means semicolons are unnecessary, but still usable in Bizubee. So the following JS if statement
 ```js
 console.log("a is greater than b!");
 console.log("a is greater than b again!");
@@ -18,7 +20,7 @@ console.log("World!")
 
 in Bizubee
 
-##No Unnecessary Parentheses
+## No Unnecessary Parentheses
 In JS an `if` statement requires parentheses around the boolean expression, but in Bizubee
 ```js
 if (a > b) {
@@ -56,7 +58,7 @@ try {
 ```
 
 
-##Optional Indentation
+## Optional Indentation
 `try-catch`, `if-else`,  function blocks and other similar code blocks can use either curly brackets or indentation as block delimiters. For example in Bizubee
 
 ```js
@@ -78,7 +80,7 @@ else
 
 In a curly bracketed block indentation is ignored, though line breaks are still not. In indented blocks neither line breaks or indentation are ignored.
 
-##For-loops
+## For-loops
 The semantics of `for` loops in Bizubee differs significantly from JS For loops. There are only two types of for loops, for-in loops and for-on loops. The for-in loop is equivalent to the for-of loop in modern JS (as of ES2015). So
 
 ```js
@@ -118,7 +120,7 @@ a
 b
 ```
 
-For-on loops are the async equivalent of for-in loops. Whereas a for-in loop iterates over an iterator, a for-on loop using similar syntax iterates over an async-iterator. Async-iterators are useful for iterating over async sequences of data
+For-on loops are the async equivalent of for-in loops. Whereas a for-in loop iterates over an iterator, a for-on loop iterates over an async-iterable. Async-iterables are useful for iterating over async sequences of data.
 
 ```js
 for packet on tcpConnection {
@@ -126,7 +128,7 @@ for packet on tcpConnection {
 }
 ```
 
-##Functions
+## Functions
 
 Bizubee functions come in 8 flavors, but the simplest function for is defined as
 
@@ -154,9 +156,9 @@ const myDivide = () => {
 }
 ```
 
-which works just like in Coffeescript (and now JavaScript!), but preserving the `this` binding of the parent scope.
+which works just like in Coffeescript (and now JavaScript!), by preserving the `this` binding of the parent scope.
 
-Just like ES2015, Bizubee has support for generator functions. A function is turned into a generator function by adding an asterix after the function's arrow (`->` or `=>`).
+Just like ES2015, Bizubee has support for generator functions. A function is turned into a generator function by adding an asterix after the function's arrow (`->` or `=>`) as in
 
 ```js
 const range = (start, end) -> * {
@@ -181,7 +183,7 @@ const getHTMLTree = (url) -> ~ {
 
 The `await` operator works on any object following the Promise/A+ spec. When `await` is encountered, function execution blocks until the promise argument is resolved, then the function continues with the resolution value taking the place of the await expression, if the promise is rejected an error is thrown which can be handled via usual error handling techniques. What gets returned by an async function call is not the return value of the function but rather a promise that resolves to the return value.
 
-The 3rd type of function is the async-generator function, a function is defined as an async generator by placing a `~*` to the right of the arrow, for example one could write an async generator that reads stock valuations for some company, and yields changes.
+The 3rd function variation is the async-generator, a function is defined as an async generator by placing a `~*` to the right of the arrow, for example one could write an async generator that reads stock valuations for some company, and yields changes.
 
 ```js
 const getStockPriceChanges = (company)-> ~* {
@@ -195,14 +197,14 @@ const getStockPriceChanges = (company)-> ~* {
 }
 ```
 
-Calling an async-generator returns an async iterator, this mean one can iterate over the price changes above with a for-on loop
+Calling an async-generator returns an async iterator, this means one can iterate over the price changes above with a for-on loop
 
 ```js
 for change on getStockPriceChanges('AOL')
 	doSomethingWithChange(change)
 ```
 
-Note that for-on loops can only exist within async functions, infact the above example is just sugar over 
+Note that for-on loops can only exist within async functions, in fact the above example is just sugar over 
 
 ```coffee
 const asyncIterator = getStockPriceChanges('AOL')
@@ -216,3 +218,82 @@ while true
 ```
 
 Notice the `await` in the desugared example.
+
+## Modules
+
+Module semantics in bizubee is an ever expanding subset of the ES2015 module specification
+
+
+### Exports
+
+Variable and constant declarations, function, and class declarations can be exported with their values also being accessible in the current file.
+
+```coffee
+export var a = 1, b = 4		# exports names a and b
+export const c = 3, d = 5	# exports names c and d
+
+export someFunc() -> {		# exports name someFunc
+	return c + b
+}
+
+export class SomeClass {	# exports name SomeClass
+	constructor(a) -> {
+    	@someProp = a
+    }
+}
+
+console.log(someFunc()) # prints 8 cause names are accessible in file too
+
+```
+
+One can also export names explicitly
+
+```coffee
+var a = 1, b = 4
+const c = 3, d = 5
+
+someFunc() -> {
+	return c + b
+}
+
+
+export {a, b, c, d, someFunc} # exports names of all variables declared
+
+```
+
+
+One can optionally set the default value of the export, if no value is provided, a module object with all the names as properties is exported as the default value
+
+```coffee
+export var 1 = 5
+
+export func() -> {
+	doSomething()
+}
+
+export default () -> {		# default value for export
+	doSomethingCool()
+}
+```
+
+### Imports
+
+Exported values can be accessed in the following manner
+
+```coffee
+# import names from someFile
+import {a, b} from ./someFile	# if we export a, b from file 'someFile'
+
+# import aliased names
+import {c as myName, d as myOtherName} from ./someFile
+
+# import default values from someFile
+import defaultValue from ./someFile
+
+const c = doSomethingWith(b, myName)
+
+defaultValue(c) 		# if defaultValue is a function
+
+```
+
+Note that `./someFile` is imported multiple times, but the file is evaluated only once and cached, so each import is based on the same module object.
