@@ -22,6 +22,24 @@ console.log("World!")
 
 in Bizubee
 
+## Variables
+
+In Bizubee the a `var` declaration is equivalent to the `let` declaration in modern JavaScript, and is therefore block scoped. A `const` declaration in Bizubee is also block scoped like in modern JS.
+
+so
+
+```js
+
+if true
+	var a = 7
+    const b = 6
+    
+console.log(a)
+console.log(b)
+```
+
+prints undefined twice because `a` and `b` are both local to the block scope.
+
 ## No Unnecessary Parentheses
 In JS an `if` statement requires parentheses around the boolean expression, but in Bizubee
 ```js
@@ -239,6 +257,52 @@ while true
 
 Notice the `await` in the desugared example.
 
+### Function Declarations
+
+Much like JavaScript, Bizubee supports function declarations, so
+
+```js
+
+myFunc() -> {
+	doSomething()
+}
+```
+
+is equivalent to 
+
+```js
+
+const myFunc = () -> {
+	doSomething()
+}
+```
+
+However, all functions declarations are bubbled to the top of their scope, so functionally they behave like JavaScript's function declarations in that
+
+```js
+
+myFunc()
+
+myFunc() -> {
+  doSomething()
+}
+
+```
+
+will run, where as
+
+```js
+
+myFunc()
+
+const myFunc = () -> {
+  doSomething()
+}
+
+```
+
+will throw an error.
+
 ## Modules
 
 Module semantics in bizubee is an ever expanding subset of the ES2015 module specification
@@ -320,7 +384,7 @@ defaultValue(c) 		# if defaultValue is a function
 
 ```
 
-Note that `./someFile` is imported multiple times, but the file is evaluated only once and cached, so each import is based on the same module object.
+Note that "./someFile" is imported multiple times, but the file is evaluated only once, with its module object cached, so each import is based on the same module object.
 
 ## Usage
 
