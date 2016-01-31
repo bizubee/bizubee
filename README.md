@@ -297,3 +297,25 @@ defaultValue(c) 		# if defaultValue is a function
 ```
 
 Note that `./someFile` is imported multiple times, but the file is evaluated only once and cached, so each import is based on the same module object.
+
+## Usage
+
+```
+	$ bizubee -c bizubee/file/path.jsl 		# to compile file
+	$ bizubee bizubee/file/path.jsl                 # to execute file
+	$ bizubee bizubee/file/path.jsl <arguments>     # to execute file with arguments
+	$ bizubee <options> bizubee/file/path.jsl <arguments>    # to add runtime args
+```
+
+
+### Options
+```
+    -c,	--compile   	Compile bisubee file and all dependencies into single file
+	-t,	--target    	Specify target for file compilation output (defaults to <filename>.js)
+	-m,	--mapfile   	Specify custom mapfile name when compiling
+	-v,	--version   	Show version of bizubee
+	-h,	--help      	Shows this list of commands and information
+
+```
+
+Note that with static compilation (`-c`), all dependencies are resolved statically and dumped into a single file. This is generally the prefered options to use when targeting the browser, whereas execution can be used for other platforms.
