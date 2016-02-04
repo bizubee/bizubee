@@ -34,6 +34,12 @@ var _errors = require('./errors');
 
 var _collectibles = require('./collectibles');
 
+var _moduleResolver = require('./module-resolver');
+
+var _moduleResolver2 = _interopRequireDefault(_moduleResolver);
+
+var _extensions = require('./extensions');
+
 var acorn = require("acorn");
 var ext = require("./lib").extension;
 var _ = null;
@@ -840,8 +846,8 @@ class Program extends Scope {
         return _path2['default'].resolve(dir, path + '.' + ext);
     }
 
-    *getImports(dir) {
-        var cache = arguments.length <= 1 || arguments[1] === undefined ? new Set() : arguments[1];
+    *getImports() {
+        var modcache = arguments.length <= 0 || arguments[0] === undefined ? new _moduleResolver2['default'](this.filename, true) : arguments[0];
 
         var parser = require('./parser');
         var _iteratorNormalCompletion9 = true;
@@ -856,14 +862,22 @@ class Program extends Scope {
                     if (statement.path === LIB_PATH) {
                         continue;
                     }
-                    var abspath = _path2['default'].resolve(dir, statement.path) + '.' + ext;
-                    if (cache.has(abspath)) {
+                    if (modcache.cached(statement.path)) {
                         continue;
                     }
-                    var ctrl = parser.parseFile(abspath, { browser: { root: false } });
-                    var ndir = _path2['default'].dirname(abspath);
-                    yield* ctrl.tree.getImports(ndir, cache);
-                    yield [abspath, ctrl.tree];
+
+                    var base = modcache.path(statement.path);
+                    var _ext = (0, _extensions.findAddition)(statement.path);
+                    var ctrl = parser.parseFile('' + base + _ext, {
+                        browser: {
+                            root: false
+                        }
+                    });
+
+                    modcache.startModule(statement.path);
+                    yield* ctrl.tree.getImports(modcache);
+                    modcache.endModule();
+                    yield [modcache.path(statement.path), ctrl.tree];
                 }
             }
         } catch (err) {
@@ -902,7 +916,7 @@ class Program extends Scope {
         var _iteratorError10 = undefined;
 
         try {
-            for (var _iterator10 = this.getImports(_path2['default'].dirname(this.filename), cache)[Symbol.iterator](), _step10; !(_iteratorNormalCompletion10 = (_step10 = _iterator10.next()).done); _iteratorNormalCompletion10 = true) {
+            for (var _iterator10 = this.getImports()[Symbol.iterator](), _step10; !(_iteratorNormalCompletion10 = (_step10 = _iterator10.next()).done); _iteratorNormalCompletion10 = true) {
                 var _step10$value = _slicedToArray(_step10.value, 2);
 
                 var abspath = _step10$value[0];

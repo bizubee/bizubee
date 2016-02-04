@@ -111,7 +111,11 @@ if (args._.length === 1 && oplen === 0) {
     if (has('c')) {
         const relpth    = `${stripExt(get('c'))}.${ext}`;
         const abspth    = path.resolve(process.cwd(), relpth);
-        const ctrl      = parser.parseFile(abspth, {browser: {root: true}});
+        const ctrl      = parser.parseFile(abspth, {
+            browser: {
+                root: true
+            }
+        });
         const jstext    = ctrl.getJSText();
         
         if (has('t')) {

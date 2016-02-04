@@ -6,6 +6,8 @@ import fs from 'fs';
 import {addSpacing, repeat} from './format';
 import {Lines, Line} from './errors';
 import {Queue} from './collectibles';
+import ModuleResolver from './module-resolver';
+import {findAddition} from './extensions';
 
 const acorn = require("acorn");
 const ext = require("./lib").extension;
@@ -710,21 +712,32 @@ export class Program extends Scope {
         return pathlib.resolve(dir, `${path}.${ext}`);
     }
     
-    * getImports(dir, cache = new Set()) {
+    * getImports(modcache = new ModuleResolver(this.filename, true)) {
         const parser = require('./parser');
         for (var statement of this.body) {
             if (statement instanceof ImportStatement) {
                 if (statement.path === LIB_PATH) {
                     continue;
                 }
-                const abspath   = `${pathlib.resolve(dir, statement.path)}.${ext}`;
-                if (cache.has(abspath)) {
+                if (modcache.cached(statement.path)) {
                     continue;
                 }
-                const ctrl      = parser.parseFile(abspath, {browser: {root: false}});
-                const ndir      = pathlib.dirname(abspath);
-                yield*  ctrl.tree.getImports(ndir, cache);
-                yield   [abspath, ctrl.tree];
+
+                const base      = modcache.path(statement.path);
+                const ext       = findAddition(statement.path);
+                const ctrl      = parser.parseFile(`${base}${ext}`, {
+                    browser: {
+                        root: false
+                    }
+                });
+
+                modcache.startModule(statement.path);
+                yield*  ctrl.tree.getImports(modcache);
+                modcache.endModule();
+                yield   [
+                    modcache.path(statement.path),
+                    ctrl.tree
+                ];
             }
         }
     }
@@ -747,12 +760,11 @@ export class Program extends Scope {
         
         getLibn(LIB_PATH);
         
-        for (let [abspath, program] of
-            this.getImports(pathlib.dirname(this.filename), cache)) {
-                
+        for (let [abspath, program] of this.getImports()) {
             const hash = getLibn(abspath);
             modmap.set(hash, program);
         }
+
         EXP = nuVar('exports');
         LIB = nuVar('bzbSupportLib');
         
