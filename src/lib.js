@@ -49,7 +49,7 @@ exports.symbols = symbols;
 
 
 function createContext(filename, ctxt) {
-    let ctx = ctxt || {};
+    let ctx = {};
    	let mdl = new Module(filename, module);
 
     for (let key in global) {
@@ -93,6 +93,12 @@ function createContext(filename, ctxt) {
 		};
     }
     
+    if (!!ctxt) {
+    	for (var key in ctxt) {
+    		ctx[key] = ctxt[key];
+    	}
+    }
+
     return ctx;
 }
 
@@ -108,8 +114,7 @@ exports.module = function() {
 	return {};
 }
 
-function runFileInNewContext(filepath, ctxt) {
-	
+function runFileInNewContext(filepath, ctxt, runtime) {
     let abspath         = path.resolve(filepath);
 	let basename 	    = path.basename(abspath);
 	let dirname	        = path.dirname(abspath);

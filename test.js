@@ -120,7 +120,8 @@ function TestKit(ctrl, promise) {
 	}
 }
 
-const myGlobal = {
+
+const globalContext = {
 	test(title, fn) {
 		let promise = new Promise(function(win, fail) {
 			let ctrl = {
@@ -184,16 +185,17 @@ co(function*() {
 			continue;
 		}
 	
+
 		let ctrl = bz.parseFile(relativePath, {
 			output: console,
 			throwSyntax: true
 		});
-	
+
 		blib.runFileInNewContext(
 			`${__dirname}/${abstractName(relativePath)}`,
-			myGlobal
+			globalContext
 			);
-		
+
 		yield Promise.resolve();
 	}
 	

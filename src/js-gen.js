@@ -3,6 +3,7 @@
 
 const bz = require('./bz-nodes');
 const js = require('./js-nodes');
+const nuVar = require('./vargen').nuVar;
 
 module.exports.getJSVar = (name, constant) => {
     constant = constant || false;
@@ -22,7 +23,7 @@ module.exports.getJSAssign = (name, value, type) => {
         '=',
         id,
         value);
-    if (defined(type)) {
+    if (type !== undefined && type !== null) {
         return new js.VariableDeclaration(
             [new js.VariableDeclarator(id, value)],
             type);
@@ -106,8 +107,23 @@ module.exports.getJSIterable = (target) => {
     return new js.CallExpression(
         new js.MemberExpression(
             target,
-            getJSMemberExpression(['Symbol', 'iterator']),
+            exports.getJSMemberExpression(['Symbol', 'iterator']),
             true),
         []
         );
+}
+
+// returns 
+module.exports.getJSConditional = (identifier, def) => {
+    if (identifier instanceof js.Identifier) {
+        return new js.ConditionalExpression(
+            new js.BinaryExpression('===', identifier, new js.Identifier('undefined')),
+            def,
+            identifier
+            );
+    } else if (typeof identifier === 'string') {
+        return exports.getJSConditional(new js.Identifier(identifier), def);
+    } else {
+        throw new Error('Conditional expression must use identifier!');
+    }
 }

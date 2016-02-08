@@ -19,10 +19,10 @@ import {
     getJSLines,
     getJSAssign,
     getJSDeclare,
+    getJSIterable,
     getJSMethodCall,
     getJSConditional,
-    getJSMemberExpression,
-    getJSIterable
+    getJSMemberExpression
     } from './js-gen';
 
 import jsCompiler from './js-compiler';
@@ -1162,7 +1162,7 @@ export class YieldExpression extends Expression {
         }
 
         if (pfunc.async) {
-            inyield = new getJSMethodCall(
+            inyield = getJSMethodCall(
                 [pfunc._ctrl, 'send'],
                 [this.argument.toJS(o)]
                 );

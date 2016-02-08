@@ -1427,7 +1427,7 @@ class YieldExpression extends Expression {
         }
 
         if (pfunc.async) {
-            inyield = new _jsGen.getJSMethodCall([pfunc._ctrl, 'send'], [this.argument.toJS(o)]);
+            inyield = (0, _jsGen.getJSMethodCall)([pfunc._ctrl, 'send'], [this.argument.toJS(o)]);
         } else {
             inyield = !this.argument ? null : this.argument.toJS(o);
         }
