@@ -6,8 +6,26 @@ import fs from 'fs';
 import {addSpacing, repeat} from './format';
 import {Lines, Line} from './errors';
 import {Queue} from './collectibles';
-import ModuleResolver from './module-resolver';
+import {ModuleResolver} from './module-resolver';
 import {findAddition} from './extensions';
+import {
+    nuVar,
+    globalVar,
+    globalHash, 
+    forbid
+    } from './vargen';
+
+import {
+    getJSLines,
+    getJSAssign,
+    getJSDeclare,
+    getJSMethodCall,
+    getJSConditional,
+    getJSMemberExpression,
+    getJSIterable
+    } from './js-gen';
+
+import jsCompiler from './js-compiler';
 
 const acorn = require("acorn");
 const ext = require("./lib").extension;
@@ -95,16 +113,7 @@ const POSITION_KEY = Symbol('position');
 const vars = new Set();
 const nodeQueue = new Queue();
 
-let LIB, EXP, DEFAULT, MAX_LEAD = '', PATHN = 0;
-
-function getLibn(path) {
-    if (PATH_MAP.has(path)) {
-        return PATH_MAP.get(path);
-    } else {
-        PATH_MAP.set(path, PATHN);
-        return PATHN++;
-    }
-}
+let LIB, EXP, DEFAULT;
 
 Array.prototype.append = function(elems) {
     if (elems instanceof Array) {
@@ -119,7 +128,8 @@ Array.prototype.append = function(elems) {
 Array.prototype.prepend = function(elems) {
     if (elems instanceof Array) {
         let i = elems.length;
-        while (i --> 0) {
+
+        while (i --> 0) {   // while i goes to 0 prepend the elements
             this.prepend(elems[i]);
         }
     } else {
@@ -147,24 +157,7 @@ function knowIdLead(name) {
 }
 
 function last(jsargs) {
-    return getJSMethodCall([LIB, 'last'], jsargs);
-}
-
-// returns new variable name that won't conflict with existing vars in AST
-function nuVar(txt = 'bzbVar') {
-    let variable = `${MAX_LEAD}_${txt}`;
-    if (vars.has(variable)) {
-        let i = 0, numeratedVar = null;
-        do {
-            i++;
-            numeratedVar = `${variable}${i}`;
-        } while (vars.has(numeratedVar));
-        
-        variable = numeratedVar;
-    }
-    
-    vars.add(variable);
-    return variable;
+    return js.getJSMethodCall([LIB, 'last'], jsargs);
 }
 
 function assertBinaryOperator(operator) {
@@ -210,112 +203,6 @@ function setParent(subject, parent) {
     }
 }
 
-function getJSVar(name, constant = false, init = null) {
-    return new js.VariableDeclaration(
-        [new js.AssignmentExpression(
-            '=',
-            new js.Identifier(name),
-            init.toJS({})
-        )],
-        (constant) ? 'const' : 'let'
-    );
-}
-
-function getJSAssign(name, value, type) {
-    let id = new js.Identifier(name);
-    let assign = new js.AssignmentExpression(
-        '=',
-        id,
-        value);
-    if (defined(type)) {
-        return new js.VariableDeclaration(
-            [new js.VariableDeclarator(id, value)],
-            type);
-    } else {
-        return new js.AssignmentExpression(
-            '=',
-            new js.Identifier(name),
-            value);
-    }
-}
-
-function getJSDeclare(pattern, jvalue, type = 'const') {
-    
-    if (pattern instanceof Identifier || pattern instanceof js.Identifier) {
-        return new js.VariableDeclaration([
-                new js.VariableDeclarator(pattern.toJS({}), jvalue)
-            ], type);
-    }
-    
-    if (pattern instanceof String) {
-        return new js.VariableDeclaration([
-                new js.VariableDeclarator(new js.Identifier(pattern), jvalue)
-            ], type);
-    }
-    
-    if (pattern instanceof ArrayPattern) {
-        let arr = [];
-        for (let sp of pattern.extractAssigns(jvalue)) {
-            arr.push(sp);
-        }
-
-        return new js.VariableDeclaration(arr, type);        
-    }
-
-
-    if (pattern instanceof ObjectPattern) {
-        let source, arr;
-        if (jvalue instanceof js.Identifier) {
-            arr = [];
-            source = jvalue;
-        } else {
-            let rvar = nuVar('patternPlaceholder');
-            let idf = new js.Identifier(rvar);
-            arr = [new js.VariableDeclarator(idf, jvalue)];
-            source = new js.Identifier(rvar);
-        }
-
-        for (let sp of pattern.extractAssigns(source)) {
-            arr.push(sp);
-        }
-
-        return new js.VariableDeclaration(arr, type);        
-    }
-
-    if (pattern instanceof Identifier) {
-        return new js.VariableDeclaration([new js.VariableDeclarator(pattern, jvalue)], type);
-    }
-
-    pattern.error('Invalid declaration type!');
-}
-
-function getJSMethodCall(names, args) {
-    return new js.CallExpression(
-        getJSMemberExpression(names), args);
-}
-
-function getJSMemberExpression(names) {
-    if (names.length === 0) {
-        throw new Error('Must have at least one man!');
-    } else {
-        let lead = new js.Identifier(names[0]);
-        for (let i = 1; i < names.length; i++) {
-            lead = new js.MemberExpression(lead, new js.Identifier(names[i]));
-        }
-
-        return lead;
-    }
-}
-
-function getJSIterable(target) {
-    return new js.CallExpression(
-        new js.MemberExpression(
-            target,
-            getJSMemberExpression(['Symbol', 'iterator']),
-            true),
-        []
-        );
-}
 
 function statement(jsExpr) {
     if (jsExpr instanceof Array) {
@@ -334,20 +221,6 @@ function statement(jsExpr) {
     }
 }
 
-// returns 
-function getJSConditional(identifier, def) {
-    if (identifier instanceof js.Identifier) {
-        return new js.ConditionalExpression(
-            new js.BinaryExpression('===', identifier, new js.Identifier('undefined')),
-            def,
-            identifier
-            );
-    } else if (typeof identifier === 'string') {
-        return getJSConditional(new js.Identifier(identifier), def);
-    } else {
-        throw new Error('Conditional expression must use identifier!');
-    }
-}
 
 function iife(statements) {
     return new js.CallExpression(
@@ -724,19 +597,30 @@ export class Program extends Scope {
                 }
 
                 const base      = modcache.path(statement.path);
-                const ext       = findAddition(statement.path);
-                const ctrl      = parser.parseFile(`${base}${ext}`, {
-                    browser: {
-                        root: false
-                    }
-                });
+                const extension = findAddition(statement.path);
+                var ctrl, gen, api;
+                if (extension === '.' + ext) {
+                    ctrl = parser.parseFile(`${base}${extension}`, {
+                        browser: {
+                            root: false
+                        }
+                    });
+
+                    gen = ctrl.tree.getImports(modcache);
+                    api = ctrl.tree;
+                } else {
+                    ctrl = jsCompiler.parse(`${base}${extension}`);
+                    gen = ctrl.getImports(modcache);
+                    api = ctrl;
+                }
+
 
                 modcache.startModule(statement.path);
-                yield*  ctrl.tree.getImports(modcache);
+                yield*  gen;
                 modcache.endModule();
-                yield   [
+                yield [
                     modcache.path(statement.path),
-                    ctrl.tree
+                    api
                 ];
             }
         }
@@ -758,15 +642,15 @@ export class Program extends Scope {
         const directives        = [
         ];
         
-        getLibn(LIB_PATH);
+        globalHash(LIB_PATH);
         
         for (let [abspath, program] of this.getImports()) {
-            const hash = getLibn(abspath);
+            const hash = globalHash(abspath);
             modmap.set(hash, program);
         }
 
-        EXP = nuVar('exports');
-        LIB = nuVar('bzbSupportLib');
+        EXP = globalVar('exports');
+        LIB = globalVar('bzbSupportLib');
         
         
         instructions.push(getJSDeclare(
@@ -2365,7 +2249,7 @@ export class Identifier extends Expression {
     constructor(name, process = true) {
         super();
 
-        if (process) knowIdLead(name);
+        forbid(name);
         this.name = name;
     }
 
@@ -2542,7 +2426,7 @@ export class ImportStatement extends Statement {
     require() {
         if (this.program.parameters.browser) {
             return getJSMethodCall([LIB, 'require'], [
-                new js.Literal(getLibn(this.program.resolve(this.path)))
+                new js.Literal(globalHash(this.program.resolve(this.path)))
             ]);
         }
         

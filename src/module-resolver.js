@@ -1,4 +1,5 @@
 const path = require('path');
+const vargen = require('./vargen');
 
 // helps keep track of paths to resolve paths of modules statically
 function ModuleResolver(rootfile, file) {
@@ -46,4 +47,13 @@ function ModuleResolver(rootfile, file) {
 	}
 }
 
-module.exports = ModuleResolver;
+module.exports.globalHash = (file, change, dir) => {
+	if (dir === undefined) {
+		dif = false;
+	}
+	const directory = (dir) ? file : path.dirname(file);
+	const fullPath = path.resolve(directory, change);
+	return vargen.globalHash(fullPath);
+}
+
+module.exports.ModuleResolver = ModuleResolver;

@@ -80,6 +80,131 @@ function assertUpdateOperator(operator) {
 	}
 }
 
+
+
+
+// returns 
+export function getJSConditional(identifier, def) {
+    if (identifier instanceof Identifier) {
+        return new ConditionalExpression(
+            new BinaryExpression('===', identifier, new Identifier('undefined')),
+            def,
+            identifier
+            );
+    } else if (typeof identifier === 'string') {
+        return getJSConditional(new Identifier(identifier), def);
+    } else {
+        throw new Error('Conditional expression must use identifier!');
+    }
+}
+
+export function getJSVar(name, constant = false, init = null) {
+    return new VariableDeclaration(
+        [new AssignmentExpression(
+            '=',
+            new Identifier(name),
+            init.toJS({})
+        )],
+        (constant) ? 'const' : 'let'
+    );
+}
+
+export function getJSAssign(name, value, type) {
+    let id = new Identifier(name);
+    let assign = new AssignmentExpression(
+        '=',
+        id,
+        value);
+    if (defined(type)) {
+        return new VariableDeclaration(
+            [new VariableDeclarator(id, value)],
+            type);
+    } else {
+        return new AssignmentExpression(
+            '=',
+            new Identifier(name),
+            value);
+    }
+}
+
+export function getJSDeclare(pattern, jvalue, type = 'const') {
+    
+    if (pattern instanceof Identifier || pattern instanceof Identifier) {
+        return new VariableDeclaration([
+                new VariableDeclarator(pattern.toJS({}), jvalue)
+            ], type);
+    }
+    
+    if (pattern instanceof String) {
+        return new VariableDeclaration([
+                new VariableDeclarator(new Identifier(pattern), jvalue)
+            ], type);
+    }
+    
+    if (pattern instanceof ArrayPattern) {
+        let arr = [];
+        for (let sp of pattern.extractAssigns(jvalue)) {
+            arr.push(sp);
+        }
+
+        return new VariableDeclaration(arr, type);        
+    }
+
+
+    if (pattern instanceof ObjectPattern) {
+        let source, arr;
+        if (jvalue instanceof Identifier) {
+            arr = [];
+            source = jvalue;
+        } else {
+            let rvar = nuVar('patternPlaceholder');
+            let idf = new Identifier(rvar);
+            arr = [new VariableDeclarator(idf, jvalue)];
+            source = new Identifier(rvar);
+        }
+
+        for (let sp of pattern.extractAssigns(source)) {
+            arr.push(sp);
+        }
+
+        return new VariableDeclaration(arr, type);        
+    }
+
+    if (pattern instanceof Identifier) {
+        return new VariableDeclaration([new VariableDeclarator(pattern, jvalue)], type);
+    }
+
+    pattern.error('Invalid declaration type!');
+}
+
+export function getJSMethodCall(names, args) {
+    return new CallExpression(
+        getJSMemberExpression(names), args);
+}
+
+export function getJSMemberExpression(names) {
+    if (names.length === 0) {
+        throw new Error('Must have at least one man!');
+    } else {
+        let lead = new Identifier(names[0]);
+        for (let i = 1; i < names.length; i++) {
+            lead = new MemberExpression(lead, new Identifier(names[i]));
+        }
+
+        return lead;
+    }
+}
+
+export function getJSIterable(target) {
+    return new CallExpression(
+        new MemberExpression(
+            target,
+            getJSMemberExpression(['Symbol', 'iterator']),
+            true),
+        []
+        );
+}
+
 export class Node {
 	constructor() {
 		this.type = this.constructor.name;

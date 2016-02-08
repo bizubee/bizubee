@@ -6,16 +6,16 @@ const EXTENSIONS = new Set([
 	'js'
 ]);
 
-module.exports.findAddition = function(filePath) {
-	const ext = path.extname(path);
+module.exports.findAddition = (filePath) => {
+	const ext = path.extname(filePath);
 	if (ext.length === 0) {
 		return '.' + lib.extension;
 	} else if (ext.length === 1) {
 		throw new Error('Filename cannot end with period!');
 	}
 
-	const end = ext.slice(1);
 
+	const end = ext.slice(1);
 	if (EXTENSIONS.has(end)) {
 		return '';
 	} else {
@@ -23,6 +23,18 @@ module.exports.findAddition = function(filePath) {
 	}
 }
 
-module.exports.toFullPath = function(filePath) {
+module.exports.toFullPath = (filePath) => {
 
+}
+
+module.exports.parseFile = (fullPath, modcache) => {
+	const modernJS = acorn.parse(fullPath, {
+		ecmaVersion: 6
+	});
+
+	return {
+		* getImports() {
+
+		}
+	}
 }
