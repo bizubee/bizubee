@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const acorn = require('acorn');
+const escodegen = require('escodegen');
 const vargen = require('./vargen');
 const resolver = require('./module-resolver');
 const js = require('./js-nodes');
@@ -10,9 +11,10 @@ const findAddition = require('./extensions').findAddition;
 const bzParser = require('./parser');
 const ext = require("./lib").extension;
 
-function getImport(line, filename) {
+function getImport(line, filename, importVar) {
+	const support = importVar || vargen.globalVar('bzbSupportLib');
 	const requiring = jsg.getJSMethodCall(
-		[vargen.globalVar('bzbSupportLib'), 'require']
+		[support, 'require']
 		[new js.Literal(+resolver.globalHash(
 			filename,
 			line.source.value
@@ -23,7 +25,7 @@ function getImport(line, filename) {
 	if (line.specifiers.length === 1) {
 		ivar = requiring;
 	} else {
-		ivar = new js.Identifier(vargen.nuvar('imports'));
+		ivar = new js.Identifier(vargen.nuVar('imports'));
 
 		declarators.push(
 			new js.VariableDeclarator(
@@ -41,7 +43,7 @@ function getImport(line, filename) {
 					new js.MemberExpression(
 						ivar,
 						jsg.getJSMemberExpression([
-							vargen.globalVar('bzbSupportLib'),
+							support,
 							'symbols',
 							'default'
 							]),
@@ -77,8 +79,8 @@ function getImport(line, filename) {
 
 
 
-function* getExports(line, filename) {
-	const gvar = vargen.globalVar('exports');
+function* getExports(line, filename, exportVar) {
+	const gvar = exportVar || vargen.globalVar('exports');
 	if (line.declaration === null) {
 		for (var specifier of line.specifiers) {
 			yield new js.ExpressionStatement(
@@ -123,8 +125,7 @@ function* getExports(line, filename) {
 	}
 }
 
-const parse = (filename) => {
-	const bzbVar	= vargen.globalVar('bzbSupportLib');
+const parse = (filename, dynamic) => {
 	const body		= [];
 	const source 	= fs.readFileSync(filename);
 	const program	= acorn.parse(source, {
@@ -183,16 +184,45 @@ const parse = (filename) => {
 		* getExports() {
 
 		},
-		toJS() {
+		getJSTree(o) {
+			return this.toJS(o || {});
+		},
+		getJSText(o) {
+			return escodegen.generate(this.toJS(o || {}));
+		},
+		toJS(o) {
 			var linebuff = [];
+			var bzbVar, exportVar;
+			if (dynamic) {
+				linebuff.push(
+					new js.ExpressionStatement(
+						new js.Literal("use strict")
+						)
+					);
+				bzbVar = vargen.nuVar('bzbSupportLib');
+				exportVar = o.exportVar;
+				linebuff.push(
+					jsg.getJSAssign(
+						bzbVar,
+						jsg.getJSMethodCall(
+							['require'],
+							[new js.Literal("bizubee lib")]
+							),
+						'const')
+					);
+			} else {
+				bzbVar = vargen.globalVar('bzbSupportLib');
+				exportVar = vargen.globalVar('exports');
+			}
+
 			for (var line of program.body) {
 				if (line.type === 'ImportDeclaration') {
-					linebuff.push(getImport(line, filename));
+					linebuff.push(getImport(line, filename, bzbVar));
 					continue;
 				}
 
 				if (line.type === 'ExportNamedDeclaration') {
-					linebuff.push(...getExports(line));
+					linebuff.push(...getExports(line, filename, exportVar));
 					continue;
 				}
 
@@ -202,9 +232,9 @@ const parse = (filename) => {
 							new js.AssignmentExpression(
 								'=',
 								new js.MemberExpression(
-									vargen.globalVar('exports'),
+									exportVar,
 									jsg.getJSMemberExpression([
-										vargen.globalVar('bzbSupportLib'),
+										bzbVar,
 										'symbols',
 										'default'
 										])
@@ -221,9 +251,10 @@ const parse = (filename) => {
 				linebuff.push(line);
 			}
 
-			return new js.FunctionExpression(
+			if (dynamic) return new js.Program(linebuff);
+			else return new js.FunctionExpression(
 				null,
-				[new js.Identifier(vargen.globalVar('exports'))],
+				[new js.Identifier(exportVar)],
 				new js.BlockStatement(linebuff)
 				);
 		}

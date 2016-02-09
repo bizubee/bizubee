@@ -994,7 +994,7 @@ export class ForStatement extends Statement {
     }
 
     syncToJS(o) {
-        let left = nuVar();
+        let left = nuVar('iterant');
         let right = this.right.toJS(o);
         let nuleft = new js.VariableDeclaration(
             [new js.VariableDeclarator(new js.Identifier(left))],

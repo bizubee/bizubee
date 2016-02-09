@@ -5,6 +5,7 @@ const fs 	    = require('fs');
 const vm        = require('vm');
 const path 	    = require('path');
 const parser   	= require('./parser');
+const jsParser	= require('./js-compiler');
 const support	= require('./fragments/lib');
 const Module	= require('module');
 const cache 	= new Map();
@@ -27,9 +28,8 @@ support.require = function(dirpath, file) {
 	}
 
     let ctx = runFileInNewContext(abspath);
-    cache.set(abspath, ctx.module.exports);
-    
-    return ctx.module.exports;
+    cache.set(abspath, ctx.exports);
+    return ctx.exports;
 }
 
 support.module = function() {
@@ -115,33 +115,32 @@ exports.module = function() {
 }
 
 function runFileInNewContext(filepath, ctxt, runtime) {
-    let abspath         = path.resolve(filepath);
-	let basename 	    = path.basename(abspath);
-	let dirname	        = path.dirname(abspath);
-	let compiledName	= `${basename}.${ext}.js`;	    // compiled name of file
-	let originalName 	= `${basename}.${ext}`;		// original name of file
-	let compiledPath    = `${dirname}/${compiledName}`;
-	let originalPath    = `${dirname}/${originalName}`;
-	let dirFiles        = new Set(fs.readdirSync(dirname));
-    let ctx             = createContext(compiledPath, ctxt);
-    
-    let js;
 
-    if (dirFiles.has(compiledName)) {
-        js  = fs.readFileSync(compiledPath, 'utf8');
-    } else {
-        if (dirFiles.has(originalName)) {
-            let ctrl    = parser.parseFile(originalPath, {});
-            
-            js          = ctrl.getJSText();
-            
-            // fs.writeFile(compiledPath, js, 'utf8');
-        } else
-        	throw new Error('File not found!');
-    }
+    let abspath         = path.resolve(filepath);
+	let dirname	        = path.dirname(abspath);
+	let extension		= path.extname(filepath);
+	let dirFiles        = new Set(fs.readdirSync(dirname));
+    let ctx             = createContext(abspath, ctxt);
+    
+    let js, jsPath;
+
+	if (extension === '.js') {
+		if (dirFiles.has(abspath))
+			throw new Error(`File "${abspath}" not found!`);
+        let ctrl    = jsParser.parse(abspath, true);
+        js          = ctrl.getJSText({exportVar: 'exports'});
+        jsPath		= abspath;
+	} else {
+		let realPath	= `${abspath}.${ext}`;
+		if (dirFiles.has(realPath))
+			throw new Error(`File "${abspath}" not found!`);
+        let ctrl    	= parser.parseFile(realPath, {});
+        js          	= ctrl.getJSText();
+        jsPath			= `${realPath}.js`;
+	}
     
     ctx.exports = {};
-    vm.runInNewContext(js, ctx, compiledPath);
+    vm.runInNewContext(js, ctx, jsPath);
     return ctx;
 }
 

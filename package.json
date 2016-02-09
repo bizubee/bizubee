@@ -23,7 +23,7 @@
     "load-grunt-tasks": "^3.3.0"
   },
   "scripts": {
-    "test": "iojs test.js"
+    "test": "node test.js"
   },
   "keywords": [
     "compiled",
