@@ -1,24 +1,29 @@
 "use strict";
 
-const fs = require('fs')
+const fs = require('fs');
+const path = require('path');
 const acorn = require('acorn');
 const escodegen = require('escodegen');
+const esvalid = require("esvalid");
 const vargen = require('./vargen');
-const resolver = require('./module-resolver');
 const js = require('./js-nodes');
 const jsg = require('./js-gen');
 const findAddition = require('./extensions').findAddition;
 const bzParser = require('./parser');
-const ext = require("./lib").extension;
+const lookup = require('./lookup');
+const ext = lookup.extension;
 
 function getImport(line, filename, importVar) {
 	const support = importVar || vargen.globalVar('bzbSupportLib');
 	const requiring = jsg.getJSMethodCall(
-		[support, 'require']
-		[new js.Literal(+resolver.globalHash(
-			filename,
-			line.source.value
-			))]
+		[support, 'require'],
+		[new js.Literal(+vargen.globalHash(
+			lookup.lookup(
+				filename,
+				line.source.value
+				)
+			)
+		)]
 		);
 	const declarators = [];
 	let ivar;
@@ -62,10 +67,7 @@ function getImport(line, filename, importVar) {
 			declarators.push(
 				new js.VariableDeclarator(
 					new js.Identifier(specifier.local.name),
-					jsg.getJSMemberExpression(
-						ivar.name,
-						specifier.imported.name
-						)
+					new js.MemberExpression(ivar, specifier.imported)
 					)
 				);
 		}
@@ -142,40 +144,40 @@ const parse = (filename, dynamic) => {
 		get tree() {
 			return program;
 		},
-		* getImports(modcache) {
+		* getImports() {
 	        for (var statement of program.body) {
 	            if (statement.type === 'ImportDeclaration') {
-	                if (statement.source === LIB_PATH) {
-	                    continue;
+	                const fullpath = lookup.lookup(filename, statement.source.value);
+	                if (fullpath === 'bizubee lib') {
+	                	continue;
 	                }
-	                if (modcache.cached(statement.source)) {
+	                if (lookup.isCached(fullpath)) {
 	                    continue;
+	                } else {
+	                	lookup.cache(fullpath);
 	                }
 
-	                const base      = modcache.path(statement.source);
-	                const extend    = findAddition(statement.source);
+	                const extension = path.extname(fullpath);
 	                var ctrl, gen, api;
 	                if (extension === '.' + ext) {
-	                    ctrl = parser.parseFile(`${base}${extension}`, {
+	                    ctrl = bzParser.parseFile(fullpath, {
 	                        browser: {
 	                            root: false
 	                        }
 	                    });
 
-	                    gen = ctrl.tree.getImports(modcache);
+	                    gen = ctrl.tree.getImports();
 	                    api = ctrl.tree;
 	                } else {
-	                    ctrl = jsCompiler.parse(`${base}${extension}`);
-	                    gen = ctrl.getImports(modcache);
+	                    ctrl = parse(fullpath, dynamic);
+	                    gen = ctrl.getImports();
 	                    api = ctrl;
 	                }
 
 
-	                modcache.startModule(statement.path);
 	                yield*  gen;
-	                modcache.endModule();
 	                yield [
-	                    modcache.path(statement.path),
+	                    fullpath,
 	                    api
 	                ];
 	            }
@@ -188,7 +190,8 @@ const parse = (filename, dynamic) => {
 			return this.toJS(o || {});
 		},
 		getJSText(o) {
-			return escodegen.generate(this.toJS(o || {}));
+			const parsed = this.toJS(o || {});
+			return escodegen.generate(parsed);
 		},
 		toJS(o) {
 			var linebuff = [];
@@ -208,7 +211,8 @@ const parse = (filename, dynamic) => {
 							['require'],
 							[new js.Literal("bizubee lib")]
 							),
-						'const')
+						'const'
+						)
 					);
 			} else {
 				bzbVar = vargen.globalVar('bzbSupportLib');
@@ -227,21 +231,29 @@ const parse = (filename, dynamic) => {
 				}
 
 				if (line.type === 'ExportDefaultDeclaration') {
+					const isDeclaration = 
+						(line.declaration.type === 'ClassDeclaration' || 
+							line.declaration.type === 'FunctionDeclaration');
+
+					if (isDeclaration) {
+						linebuff.push(line.declaration);
+					}
+
 					linebuff.push(
 						new js.ExpressionStatement(
 							new js.AssignmentExpression(
 								'=',
 								new js.MemberExpression(
-									exportVar,
+									new js.Identifier(exportVar),
 									jsg.getJSMemberExpression([
 										bzbVar,
 										'symbols',
 										'default'
-										])
-									),
+										]),
 									true
-								),
-								line.declaration
+									),
+								(isDeclaration) ? line.declaration.id : line.declaration
+								)
 							)
 						);
 
@@ -250,6 +262,7 @@ const parse = (filename, dynamic) => {
 
 				linebuff.push(line);
 			}
+
 
 			if (dynamic) return new js.Program(linebuff);
 			else return new js.FunctionExpression(

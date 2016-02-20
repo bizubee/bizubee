@@ -30,6 +30,7 @@ function Queue() {
 		length++;
 	}
 
+	// regurgitate a value out of the queue
 	this.vomit = function() {
 		if (length === 0) {
 			throw new Error("Cannot crap values out of empty queue");

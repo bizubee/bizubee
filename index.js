@@ -8,8 +8,9 @@ var path    = require('path');
 var cmd     = require('minimist');
 var parser 	= require('./src/parser');
 var bzbLib 	= require('./src/lib');
+var lookup  = require('./src/lookup');
 
-const ext = bzbLib.extension;
+const ext = lookup.extension;
 
 function stripExt(text) {
     if (text.endsWith(ext)) {
@@ -135,11 +136,9 @@ if (args._.length === 1 && oplen === 0) {
     }
     
     if (args._.length > 1) {
-        var pth     = path.resolve(process.cwd(), stripExt(args._[1]));
-        var ctx     = bzbLib.runFileInNewContext(pth);
-        if (ctx.hasOwnProperty('main')) {
-            ctx.main(args._.slice(1));
-        }
+        var pth     = path.resolve(process.cwd(), `${stripExt(args._[1])}.${ext}`);
+        var result  = bzbLib.runFileInNewContext(pth, {}, false);
+        result.main(args._.slice(1));
     } else {
         showHelp();
     }

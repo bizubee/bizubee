@@ -28,13 +28,13 @@ var _fs = require('fs');
 
 var _fs2 = _interopRequireDefault(_fs);
 
+var _path3 = _interopRequireDefault(_path);
+
 var _format = require('./format');
 
 var _errors = require('./errors');
 
 var _collectibles = require('./collectibles');
-
-var _moduleResolver = require('./module-resolver');
 
 var _extensions = require('./extensions');
 
@@ -45,6 +45,10 @@ var _jsGen = require('./js-gen');
 var _jsCompiler = require('./js-compiler');
 
 var _jsCompiler2 = _interopRequireDefault(_jsCompiler);
+
+var _lookup = require('./lookup');
+
+var _lookup2 = _interopRequireDefault(_lookup);
 
 var acorn = require("acorn");
 var ext = require("./lib").extension;
@@ -96,7 +100,6 @@ var vars = new Set();
 var nodeQueue = new _collectibles.Queue();
 
 var LIB = undefined,
-    EXP = undefined,
     DEFAULT = undefined;
 
 Array.prototype.append = function (elems) {
@@ -371,13 +374,13 @@ class Node {
 
         try {
             for (var _iterator2 = lines[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-                var line = _step2.value;
+                var _line = _step2.value;
 
                 if (Math.abs(i - y) < 4) {
-                    output.log((0, _format.addSpacing)(i + 1, 6) + '|\t\t' + line.untabbed);
+                    output.log((0, _format.addSpacing)(i + 1, 6) + '|\t\t' + _line.untabbed);
 
                     if (i === y) {
-                        var offset = line.map(x);
+                        var offset = _line.map(x);
                         output.log((0, _format.addSpacing)('', 6) + ' \t\t' + (0, _format.repeat)(' ', offset) + '^');
                     }
                 }
@@ -575,26 +578,28 @@ class Scope extends Node {
         try {
 
             for (var _iterator5 = this.body[Symbol.iterator](), _step5; !(_iteratorNormalCompletion5 = (_step5 = _iterator5.next()).done); _iteratorNormalCompletion5 = true) {
-                var line = _step5.value;
+                var _line2 = _step5.value;
 
                 // if line is a function declaration we compile the function
                 // then save it in a map to be put later in a const declaration at top of
                 // scope, cause all function declarations are 'bubbled' to the top of their scope
 
-                if (line instanceof FunctionDeclaration) {
-
-                    var _name = line.identifier.name;
-
-                    if (this._funcDeclarations.has(_name)) {
-                        line.error('Cannot declare function more than once!');
+                if (_line2 instanceof FunctionDeclaration) {
+                    var _name = _line2.identifier.name;
+                    if (this instanceof Program && _name === 'main') {
+                        this.containsMain = true;
                     }
 
-                    this._funcDeclarations.set(_name, line.func.toJS(o));
+                    if (this._funcDeclarations.has(_name)) {
+                        _line2.error('Cannot declare function more than once!');
+                    }
+
+                    this._funcDeclarations.set(_name, _line2.func.toJS(o));
 
                     continue;
                 }
 
-                var nodes = line.toJS(o);
+                var nodes = _line2.toJS(o);
                 if (nodes instanceof Array) {
                     // if the js compilation is a serialisation (array) of nodes
                     // we must yield each node of the serialization individually
@@ -631,7 +636,7 @@ class Scope extends Node {
                         continue;
                     }
 
-                    line.error('Invalid object ' + typeof nodes + '!');
+                    _line2.error('Invalid object ' + typeof nodes + '!');
                 }
             }
         } catch (err) {
@@ -656,6 +661,7 @@ exports.Scope = Scope;
 class Program extends Scope {
     constructor(statements) {
         super(statements);
+        setParent(statements, this);
 
         this.containsMain = false;
 
@@ -665,18 +671,11 @@ class Program extends Scope {
         }
     }
 
-    resolve(path) {
-        if (path === LIB_PATH) {
-            return path;
-        }
-
-        var dir = _path2['default'].dirname(this.filename);
-        return _path2['default'].resolve(dir, path + '.' + ext);
+    resolve(route) {
+        return _lookup2['default'].lookup(this.filename, route);
     }
 
     *getImports() {
-        var modcache = arguments.length <= 0 || arguments[0] === undefined ? new _moduleResolver.ModuleResolver(this.filename, true) : arguments[0];
-
         var parser = require('./parser');
         var _iteratorNormalCompletion7 = true;
         var _didIteratorError7 = false;
@@ -686,36 +685,36 @@ class Program extends Scope {
             for (var _iterator7 = this.body[Symbol.iterator](), _step7; !(_iteratorNormalCompletion7 = (_step7 = _iterator7.next()).done); _iteratorNormalCompletion7 = true) {
                 var statement = _step7.value;
 
-                if (statement instanceof ImportStatement) {
+                if (statement instanceof ImportDeclaration) {
                     if (statement.path === LIB_PATH) {
                         continue;
                     }
-                    if (modcache.cached(statement.path)) {
+                    var fullpath = _lookup2['default'].lookup(this.filename, statement.path);
+                    if (_lookup2['default'].isCached(fullpath)) {
                         continue;
+                    } else {
+                        _lookup2['default'].cache(fullpath);
                     }
 
-                    var base = modcache.path(statement.path);
-                    var extension = (0, _extensions.findAddition)(statement.path);
+                    var extension = _path3['default'].extname(fullpath);
                     var ctrl, gen, api;
                     if (extension === '.' + ext) {
-                        ctrl = parser.parseFile('' + base + extension, {
+                        ctrl = parser.parseFile(fullpath, {
                             browser: {
                                 root: false
                             }
                         });
 
-                        gen = ctrl.tree.getImports(modcache);
+                        gen = ctrl.tree.getImports();
                         api = ctrl.tree;
                     } else {
-                        ctrl = _jsCompiler2['default'].parse('' + base + extension);
-                        gen = ctrl.getImports(modcache);
+                        ctrl = _jsCompiler2['default'].parse(fullpath);
+                        gen = ctrl.getImports();
                         api = ctrl;
                     }
 
-                    modcache.startModule(statement.path);
                     yield* gen;
-                    modcache.endModule();
-                    yield [modcache.path(statement.path), api];
+                    yield [fullpath, api];
                 }
             }
         } catch (err) {
@@ -778,7 +777,7 @@ class Program extends Scope {
             }
         }
 
-        EXP = (0, _vargen.globalVar)('exports');
+        o.exportVar = (0, _vargen.globalVar)('exports');
         LIB = (0, _vargen.globalVar)('bzbSupportLib');
 
         instructions.push((0, _jsGen.getJSDeclare)(new js.Identifier(LIB), acorn.parseExpressionAt(_fs2['default'].readFileSync(__dirname + '/fragments/lib.js', 'utf8'), 0, { ecmaVersion: 6 }), 'const'));
@@ -845,6 +844,7 @@ class Program extends Scope {
     }
 
     compileBrowserModule(o) {
+        o.exportVar = (0, _vargen.globalVar)('exports');
         var instructions = [];
 
         var _iteratorNormalCompletion11 = true;
@@ -875,13 +875,12 @@ class Program extends Scope {
         if (this._funcDeclarations.size > 0) instructions.unshift(this.getFunctionDeclarations());
         if (this._opvars.length > 0) instructions.unshift(this.getOpvarsDeclaration());
 
-        return new js.FunctionExpression(null, [new js.Identifier(EXP)], new js.BlockStatement(instructions));
+        return new js.FunctionExpression(null, [new js.Identifier(o.exportVar)], new js.BlockStatement(instructions));
     }
 
     runtimeCompile(o) {
         LIB = (0, _vargen.nuVar)('bzbSupportLib');
-        EXP = (0, _vargen.nuVar)('moduleExports');
-        var instructions = statement([new js.Literal("use strict"), (0, _jsGen.getJSAssign)(LIB, (0, _jsGen.getJSMethodCall)(['require'], [new js.Literal(LIB_PATH)]), 'const'), (0, _jsGen.getJSDeclare)(new js.Identifier(EXP, false), (0, _jsGen.getJSMethodCall)([LIB, 'module'], [])), EMPTY, EMPTY]) || o.instructions;
+        var instructions = statement([new js.Literal("use strict"), (0, _jsGen.getJSAssign)(LIB, (0, _jsGen.getJSMethodCall)(['require'], [new js.Literal(LIB_PATH)]), 'const'), EMPTY, EMPTY, EMPTY]) || o.instructions;
 
         var _iteratorNormalCompletion12 = true;
         var _didIteratorError12 = false;
@@ -908,9 +907,7 @@ class Program extends Scope {
             }
         }
 
-        instructions.append(statement([new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)(['module', 'exports']), new js.Identifier(EXP))]));
-
-        instructions.append(statement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)(['global', 'main']), new js.Identifier('main'))));
+        if (this.containsMain) instructions.append(statement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([o.exportVar, o.exportVar]), new js.Identifier('main'))));
 
         if (this._opvars.length > 0) instructions[3] = this.getOpvarsDeclaration();
         if (this._funcDeclarations.size > 0) instructions[4] = this.getFunctionDeclarations();
@@ -954,9 +951,9 @@ class BlockStatement extends Scope {
 
         try {
             for (var _iterator13 = this.getJSLines(o)[Symbol.iterator](), _step13; !(_iteratorNormalCompletion13 = (_step13 = _iterator13.next()).done); _iteratorNormalCompletion13 = true) {
-                var line = _step13.value;
+                var _line3 = _step13.value;
 
-                if (line instanceof js.Expression) instructions.push(statement(line));else instructions.push(line);
+                if (_line3 instanceof js.Expression) instructions.push(statement(_line3));else instructions.push(_line3);
             }
         } catch (err) {
             _didIteratorError13 = true;
@@ -1180,7 +1177,7 @@ class ForStatement extends Statement {
     }
 
     syncToJS(o) {
-        var left = (0, _vargen.nuVar)();
+        var left = (0, _vargen.nuVar)('iterant');
         var right = this.right.toJS(o);
         var nuleft = new js.VariableDeclaration([new js.VariableDeclarator(new js.Identifier(left))], 'let');
 
@@ -1211,9 +1208,9 @@ class ForStatement extends Statement {
 
         try {
             for (var _iterator14 = this.body[Symbol.iterator](), _step14; !(_iteratorNormalCompletion14 = (_step14 = _iterator14.next()).done); _iteratorNormalCompletion14 = true) {
-                var line = _step14.value;
+                var _line4 = _step14.value;
 
-                body.append(line.toJS(o));
+                body.append(_line4.toJS(o));
             }
         } catch (err) {
             _didIteratorError14 = true;
@@ -1887,15 +1884,15 @@ exports.Super = Super;
 
 class ClassExpression extends Expression {
     constructor() {
-        var id = arguments.length <= 0 || arguments[0] === undefined ? null : arguments[0];
+        var identifier = arguments.length <= 0 || arguments[0] === undefined ? null : arguments[0];
         var superClass = arguments.length <= 1 || arguments[1] === undefined ? null : arguments[1];
         var body = arguments.length <= 2 || arguments[2] === undefined ? [] : arguments[2];
 
         super();
 
-        setParent([id, superClass, body], this);
+        setParent([identifier, superClass, body], this);
 
-        this.id = id;
+        this.identifier = identifier;
         this.superClass = superClass;
         this.body = body;
     }
@@ -1911,24 +1908,24 @@ class ClassExpression extends Expression {
 
         try {
             for (var _iterator25 = this.body[Symbol.iterator](), _step25; !(_iteratorNormalCompletion25 = (_step25 = _iterator25.next()).done); _iteratorNormalCompletion25 = true) {
-                var line = _step25.value;
+                var _line5 = _step25.value;
 
-                if (line instanceof MethodDefinition) {
+                if (_line5 instanceof MethodDefinition) {
 
-                    if (line.value.async) {
+                    if (_line5.value.async) {
                         // async methods are not supported in classes so instead they have
                         // to be added to the list of prototype properties
-                        var bin = line['static'] ? statprops : props;
-                        if (line.kind !== "method") {
-                            line.error('"' + line.kind + '" method type not allowed as async in class definitions!');
+                        var bin = _line5['static'] ? statprops : props;
+                        if (_line5.kind !== "method") {
+                            _line5.error('"' + _line5.kind + '" method type not allowed as async in class definitions!');
                         }
 
-                        bin.push(new js.Property(line.key, line.value.toJS(o)));
-                    } else body.push(line.toJS(o));
-                } else if (line instanceof ClassProperty) {
-                    props.push(line.toJS(o));
+                        bin.push(new js.Property(_line5.key, _line5.value.toJS(o)));
+                    } else body.push(_line5.toJS(o));
+                } else if (_line5 instanceof ClassProperty) {
+                    props.push(_line5.toJS(o));
                 } else {
-                    line.error('Class body item unrecognized!');
+                    _line5.error('Class body item unrecognized!');
                 }
             }
 
@@ -1952,8 +1949,8 @@ class ClassExpression extends Expression {
         var cls = new js.ClassExpression(null, superClass, body);
 
         if (props.length === 0 && statprops.length === 0) {
-            if (defined(this.id)) {
-                return (0, _jsGen.getJSAssign)(this.id.name, cls, 'const');
+            if (defined(this.identifier)) {
+                return (0, _jsGen.getJSAssign)(this.identifier.name, cls, 'const');
             } else {
                 return cls;
             }
@@ -1964,8 +1961,8 @@ class ClassExpression extends Expression {
                 rapper.arguments.push(new js.ObjectExpression(statprops));
             }
 
-            if (defined(this.id)) {
-                return (0, _jsGen.getJSAssign)(this.id.name, rapper, 'const');
+            if (defined(this.identifier)) {
+                return (0, _jsGen.getJSAssign)(this.identifier.name, rapper, 'const');
             } else {
                 return rapper;
             }
@@ -1973,8 +1970,8 @@ class ClassExpression extends Expression {
     }
 
     *extractVariables() {
-        if (defined(this.id)) {
-            yield this.id.name;
+        if (defined(this.identifier)) {
+            yield this.identifier.name;
         } else {
             this.error('Cannot extract name from anonymous class!');
         }
@@ -2036,11 +2033,6 @@ class FunctionDeclaration extends Declaration {
     }
 
     _toJS(o) {
-        if (this.parent instanceof Program && this.identifier.name === 'main') {
-
-            this.program.containsMain = true;
-        }
-
         if (this.parent instanceof Property) return new js.Property(this.identifier, this.func.toJS(o));else return (0, _jsGen.getJSDeclare)(this.identifier, this.func.toJS(o), 'const');
     }
 
@@ -2928,30 +2920,48 @@ class NumberLiteral extends Literal {
 
 exports.NumberLiteral = NumberLiteral;
 
-class All extends Node {}
-
-// a <id or *> as <id> pattern
-exports.All = All;
-
-class ModuleAlias extends Node {
-    constructor(origin, target) {
+class ModuleSpecifier extends Statement {
+    constructor(local) {
         super();
-        setParent([origin, target], this);
-
-        this.origin = origin;
-        this.target = target;
+        setParent(local, this);
+        this.local = local;
     }
 }
 
-exports.ModuleAlias = ModuleAlias;
+exports.ModuleSpecifier = ModuleSpecifier;
 
-class ImportStatement extends Statement {
-    constructor(target, path) {
+class ModuleDeclaration extends Statement {}
+
+exports.ModuleDeclaration = ModuleDeclaration;
+
+class ImportSpecifier extends ModuleSpecifier {
+    constructor(imported) {
+        var local = arguments.length <= 1 || arguments[1] === undefined ? null : arguments[1];
+
+        super(local || imported);
+        setParent(imported, this);
+
+        this.imported = imported;
+    }
+}
+
+exports.ImportSpecifier = ImportSpecifier;
+
+class ImportNamespaceSpecifier extends ModuleSpecifier {}
+
+exports.ImportNamespaceSpecifier = ImportNamespaceSpecifier;
+
+class ImportDefaultSpecifier extends ModuleSpecifier {}
+
+exports.ImportDefaultSpecifier = ImportDefaultSpecifier;
+
+class ImportDeclaration extends ModuleDeclaration {
+    constructor(specifiers, source) {
         super();
-        setParent(target, this);
+        setParent(specifiers, this);
 
-        this.target = target;
-        this.path = path;
+        this.specifiers = specifiers;
+        this.path = source;
     }
 
     requireDefault() {
@@ -2960,184 +2970,130 @@ class ImportStatement extends Statement {
 
     // generate require code for
     require() {
-        if (this.program.parameters.browser) {
-            return (0, _jsGen.getJSMethodCall)([LIB, 'require'], [new js.Literal((0, _vargen.globalHash)(this.program.resolve(this.path)))]);
-        }
-
-        if (this.path[0] === '.') {
-            return (0, _jsGen.getJSMethodCall)([LIB, 'require'], [new js.Identifier('__dirname'), new js.Literal(this.path)]);
-        } else {
-            return (0, _jsGen.getJSMethodCall)(['require'], [new js.Literal(this.path)]);
-        }
+        return (0, _jsGen.getJSMethodCall)([LIB, 'require'], [new js.Literal(+(0, _vargen.globalHash)(this.program.resolve(this.path)))]);
     }
 
     _toJS(o) {
+        var support = o.importVar || (0, _vargen.globalVar)('bzbSupportLib');
+        var requiring = this.require();
 
-        if (this.target instanceof ModuleAlias) {
-            // for: import <somevar or wildcard> as <some var or pattern> from <path> ... cases
+        var declarators = [];
+        var ivar = undefined;
+        if (this.specifiers.length === 1) {
+            ivar = requiring;
+        } else {
+            ivar = new js.Identifier((0, _vargen.nuVar)('imports'));
 
-            var id = this.target.origin;
-            var tg = this.target.target;
+            declarators.push(new js.VariableDeclarator(ivar, requiring));
+        }
 
-            if (id instanceof All) {
-                return (0, _jsGen.getJSDeclare)(new js.Identifier(tg.name), this.require(), 'const');
-            } else {
-                if (tg instanceof Pattern) {
-                    var vname = (0, _vargen.nuVar)('patternPlaceholder');
-                    var vvalue = new js.Identifier(vname);
-                    var def = (0, _jsGen.getJSDeclare)(vvalue, this.requireDefault(), 'let');
-                    var _vars = (0, _jsGen.getJSDeclare)(tg, vvalue.toJS({}), 'const');
-                    return [def, _vars];
+        var _iteratorNormalCompletion33 = true;
+        var _didIteratorError33 = false;
+        var _iteratorError33 = undefined;
+
+        try {
+            for (var _iterator33 = this.specifiers[Symbol.iterator](), _step33; !(_iteratorNormalCompletion33 = (_step33 = _iterator33.next()).done); _iteratorNormalCompletion33 = true) {
+                var specifier = _step33.value;
+
+                if (specifier instanceof ImportDefaultSpecifier) {
+                    declarators.push(new js.VariableDeclarator(new js.Identifier(specifier.local.name), new js.MemberExpression(ivar, (0, _jsGen.getJSMemberExpression)([support, 'symbols', 'default']), true)));
+                } else if (specifier instanceof ImportNamespaceSpecifier) {
+                    declarators.push(new js.VariableDeclarator(new js.Identifier(specifier.local.name), ivar));
                 } else {
-                    return (0, _jsGen.getJSDeclare)(tg, this.requireDefault(), 'const');
+                    declarators.push(new js.VariableDeclarator(new js.Identifier(specifier.local.name), new js.MemberExpression(ivar, specifier.imported)));
                 }
             }
-        } else {
-
-            // for cases like import {....} from <path>
-            if (this.target instanceof Array) {
-                var varname = (0, _vargen.nuVar)('imports');
-                var list = [(0, _jsGen.getJSDeclare)(new js.Identifier(varname), this.require(), 'const')];
-                var _iteratorNormalCompletion33 = true;
-                var _didIteratorError33 = false;
-                var _iteratorError33 = undefined;
-
-                try {
-                    for (var _iterator33 = this.target[Symbol.iterator](), _step33; !(_iteratorNormalCompletion33 = (_step33 = _iterator33.next()).done); _iteratorNormalCompletion33 = true) {
-                        var alias = _step33.value;
-
-                        if (alias instanceof Identifier) {
-                            list.push((0, _jsGen.getJSDeclare)(alias, (0, _jsGen.getJSMemberExpression)([varname, alias.name]), 'const'));
-                            continue;
-                        }
-
-                        // for: .. {..., someVar as someVarOrPattern,...} .. cases
-                        if (alias instanceof ModuleAlias) {
-                            if (alias.origin instanceof All) {
-                                alias.origin.error( // can't have: import {..., * as someVarOrPattern,...} ....
-                                "Wildcard not allowed in import list alias!");
-                            }
-
-                            if (alias.origin instanceof Identifier || alias.origin instanceof ModuleAlias) {
-
-                                list.push((0, _jsGen.getJSDeclare)(alias.target, alias.origin.toJS(o), 'const'));
-
-                                continue;
-                            }
-
-                            alias.origin.error('Unrecognized import alias origin type!');
-                        }
-                    }
-                } catch (err) {
-                    _didIteratorError33 = true;
-                    _iteratorError33 = err;
-                } finally {
-                    try {
-                        if (!_iteratorNormalCompletion33 && _iterator33['return']) {
-                            _iterator33['return']();
-                        }
-                    } finally {
-                        if (_didIteratorError33) {
-                            throw _iteratorError33;
-                        }
-                    }
+        } catch (err) {
+            _didIteratorError33 = true;
+            _iteratorError33 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion33 && _iterator33['return']) {
+                    _iterator33['return']();
                 }
-
-                return list;
-            } else if (this.target instanceof Identifier) {
-                return (0, _jsGen.getJSDeclare)(this.target, this.requireDefault(), 'const');
+            } finally {
+                if (_didIteratorError33) {
+                    throw _iteratorError33;
+                }
             }
         }
+
+        return new js.VariableDeclaration(declarators, 'const');
     }
 }
 
-exports.ImportStatement = ImportStatement;
+exports.ImportDeclaration = ImportDeclaration;
 
-class ExportStatement extends Statement {
-    constructor(target) {
-        var isdefault = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
+class ExportDeclaration extends ModuleDeclaration {}
+
+class ExportSpecifier extends ModuleSpecifier {
+    constructor(local) {
+        var exported = arguments.length <= 1 || arguments[1] === undefined ? null : arguments[1];
+
+        super(local);
+        setParent(local, this);
+
+        this.exported = exported || local;
+    }
+}
+
+exports.ExportSpecifier = ExportSpecifier;
+
+class ExportNamedDeclaration extends ExportDeclaration {
+    constructor(declaration, specifiers) {
+        var source = arguments.length <= 2 || arguments[2] === undefined ? null : arguments[2];
 
         super();
-        setParent(target, this);
+        setParent([declaration, specifiers], this);
 
-        this.target = target;
-        this.isdefault = isdefault;
+        this.declaration = declaration;
+        this.specifiers = specifiers;
+        this.path = source;
     }
 
     _toJS(o) {
-        if (this.isdefault) {
-            return new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(EXP), (0, _jsGen.getJSMemberExpression)([LIB, 'symbols', 'default']), true), this.target.toJS(o));
-        } else {
-            if (this.target instanceof Array) {
-                var list = [];
-                var _iteratorNormalCompletion34 = true;
-                var _didIteratorError34 = false;
-                var _iteratorError34 = undefined;
+        var lines = [];
+        var gvar = o.exportVar || (0, _vargen.globalVar)('exports');
+        if (this.declaration === null) {
+            var _iteratorNormalCompletion34 = true;
+            var _didIteratorError34 = false;
+            var _iteratorError34 = undefined;
 
+            try {
+                for (var _iterator34 = this.specifiers[Symbol.iterator](), _step34; !(_iteratorNormalCompletion34 = (_step34 = _iterator34.next()).done); _iteratorNormalCompletion34 = true) {
+                    var specifier = _step34.value;
+
+                    lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, specifier.exported.name]), new js.Identifier(specifier.local.name))));
+                }
+            } catch (err) {
+                _didIteratorError34 = true;
+                _iteratorError34 = err;
+            } finally {
                 try {
-                    for (var _iterator34 = this.target[Symbol.iterator](), _step34; !(_iteratorNormalCompletion34 = (_step34 = _iterator34.next()).done); _iteratorNormalCompletion34 = true) {
-                        var alias = _step34.value;
-
-                        if (alias instanceof ModuleAlias) {
-                            if (alias.origin instanceof All) {
-                                alias.origin.error("Wildcard not allowed in export list alias!");
-                            }
-
-                            if (alias.target instanceof Pattern) {
-                                alias.target.error("Pattern not allowed as export alias target!");
-                            }
-
-                            if (alias.target instanceof Identifier) {
-                                list.push(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([EXP, alias.target.name]), alias.origin.toJS(o)));
-                            } else alias.target.error('Unrecognized token, only identifiers allowed!');
-
-                            continue;
-                        }
-
-                        if (alias instanceof Identifier) {
-                            list.push(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([EXP, alias.name]), alias.toJS(o)));
-                        }
+                    if (!_iteratorNormalCompletion34 && _iterator34['return']) {
+                        _iterator34['return']();
                     }
-                } catch (err) {
-                    _didIteratorError34 = true;
-                    _iteratorError34 = err;
                 } finally {
-                    try {
-                        if (!_iteratorNormalCompletion34 && _iterator34['return']) {
-                            _iterator34['return']();
-                        }
-                    } finally {
-                        if (_didIteratorError34) {
-                            throw _iteratorError34;
-                        }
+                    if (_didIteratorError34) {
+                        throw _iteratorError34;
                     }
                 }
-            } else {
-                var list = [];
-                if (this.target instanceof FunctionDeclaration) {
-                    var scope = this.getParentScope();
-                    var _name3 = this.target.identifier.name;
-
-                    if (scope._funcDeclarations.has(_name3)) {
-                        this.target.error('Cannot declare function more than once!');
-                    }
-
-                    scope._funcDeclarations.set(_name3, this.target.func.toJS(o));
-                } else {
-                    list.push(this.target.toJS(o));
-                }
-
+            }
+        } else {
+            var declaration = this.declaration;
+            if (declaration instanceof VariableDeclaration) {
+                lines.push(declaration.toJS(o));
                 var _iteratorNormalCompletion35 = true;
                 var _didIteratorError35 = false;
                 var _iteratorError35 = undefined;
 
                 try {
-                    for (var _iterator35 = this.target.extractVariables()[Symbol.iterator](), _step35; !(_iteratorNormalCompletion35 = (_step35 = _iterator35.next()).done); _iteratorNormalCompletion35 = true) {
-                        var _name4 = _step35.value;
+                    for (var _iterator35 = declaration.declarators[Symbol.iterator](), _step35; !(_iteratorNormalCompletion35 = (_step35 = _iterator35.next()).done); _iteratorNormalCompletion35 = true) {
+                        var declarator = _step35.value;
 
-                        var left = (0, _jsGen.getJSMemberExpression)([EXP, _name4]);
-                        var right = new js.Identifier(_name4);
-                        list.push(new js.AssignmentExpression('=', left, right));
+                        if (declarator.id instanceof Pattern) throw new Error('Pattern exports not yet implemented!');
+
+                        lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, declarator.id.name]), new js.Identifier(declarator.id.name))));
                     }
                 } catch (err) {
                     _didIteratorError35 = true;
@@ -3153,11 +3109,60 @@ class ExportStatement extends Statement {
                         }
                     }
                 }
+            } else {
+                var _name3 = declaration.identifier.name;
+                if (declaration instanceof FunctionDeclaration) {
+                    var scope = this.program;
 
-                return list;
+                    if (scope._funcDeclarations.has(_name3)) {
+                        declaration.error('Cannot declare function more than once!');
+                    }
+
+                    scope._funcDeclarations.set(_name3, declaration.func.toJS(o));
+                } else {
+                    lines.push(declaration.toJS(o));
+                }
+
+                lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, _name3]), new js.Identifier(_name3))));
+            }
+        }
+
+        return lines;
+    }
+}
+
+exports.ExportNamedDeclaration = ExportNamedDeclaration;
+
+class ExportDefaultDeclaration extends ExportDeclaration {
+    constructor(declaration) {
+        super();
+        setParent(declaration, this);
+
+        this.declaration = declaration;
+    }
+
+    _toJS(o) {
+        var exportVar = o.exportVar || (0, _vargen.globalVar)('exports');
+        var bzbVar = LIB;
+        if (this.declaration instanceof Expression) {
+            return new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default']), true), line.declaration));
+        } else {
+            var _name4 = this.declaration.identifier.name;
+            if (this.declaration instanceof FunctionDeclaration) {
+                var scope = this.program;
+
+                if (scope._funcDeclarations.has(_name4)) {
+                    this.declaration.error('Cannot declare function more than once!');
+                }
+
+                scope._funcDeclarations.set(_name4, this.declaration.func.toJS(o));
+
+                return new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default']), true), new js.Identifier(_name4)));
+            } else {
+                return [this.declaration.toJS(o), new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default'])), true), new js.Identifier(_name4))];
             }
         }
     }
 }
 
-exports.ExportStatement = ExportStatement;
+exports.ExportDefaultDeclaration = ExportDefaultDeclaration;

@@ -180,19 +180,16 @@ co(function*(){
 co(function*() {
 	for (let testFile of testFiles) {
 		let relativePath = `test/function/${testFile}`;
-	
 		if (!testFile.endsWith('.jsl')) {
 			continue;
 		}
-	
 
 		let ctrl = bz.parseFile(relativePath, {
 			output: console,
 			throwSyntax: true
 		});
-
 		blib.runFileInNewContext(
-			`${__dirname}/${abstractName(relativePath)}`,
+			relativePath,
 			globalContext
 			);
 

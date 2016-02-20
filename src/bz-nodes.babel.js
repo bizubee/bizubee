@@ -3,10 +3,10 @@ import * as js from './js-nodes';
 import escodegen from 'escodegen';
 import pathlib from 'path'
 import fs from 'fs';
+import path from 'path';
 import {addSpacing, repeat} from './format';
 import {Lines, Line} from './errors';
 import {Queue} from './collectibles';
-import {ModuleResolver} from './module-resolver';
 import {findAddition} from './extensions';
 import {
     nuVar,
@@ -26,6 +26,7 @@ import {
     } from './js-gen';
 
 import jsCompiler from './js-compiler';
+import lookup from './lookup';
 
 const acorn = require("acorn");
 const ext = require("./lib").extension;
@@ -113,7 +114,7 @@ const POSITION_KEY = Symbol('position');
 const vars = new Set();
 const nodeQueue = new Queue();
 
-let LIB, EXP, DEFAULT;
+let LIB, DEFAULT;
 
 Array.prototype.append = function(elems) {
     if (elems instanceof Array) {
@@ -525,11 +526,12 @@ export class Scope extends Node {
             // then save it in a map to be put later in a const declaration at top of
             // scope, cause all function declarations are 'bubbled' to the top of their scope
 
-            if (line instanceof FunctionDeclaration) {
-            
-            
+            if (line instanceof FunctionDeclaration) {    
                 const name = line.identifier.name;
-            
+                if (this instanceof Program && name === 'main') {
+                    this.containsMain = true;
+                }
+
                 if (this._funcDeclarations.has(name)) {
                     line.error('Cannot declare function more than once!');
                 }
@@ -567,7 +569,9 @@ export class Scope extends Node {
 export class Program extends Scope {
     constructor(statements) {
         super(statements);
-        
+        setParent(statements, this);
+
+
         this.containsMain = false;
         
         while (nodeQueue.length > 0) {
@@ -576,50 +580,44 @@ export class Program extends Scope {
         }
     }
     
-    resolve(path) {
-        if (path === LIB_PATH) {
-            return path;
-        }
-        
-        const dir     = pathlib.dirname(this.filename);
-        return pathlib.resolve(dir, `${path}.${ext}`);
+    resolve(route) {
+        return lookup.lookup(this.filename, route);
     }
     
-    * getImports(modcache = new ModuleResolver(this.filename, true)) {
+    * getImports() {
         const parser = require('./parser');
         for (var statement of this.body) {
-            if (statement instanceof ImportStatement) {
+            if (statement instanceof ImportDeclaration) {
                 if (statement.path === LIB_PATH) {
                     continue;
                 }
-                if (modcache.cached(statement.path)) {
+                const fullpath = lookup.lookup(this.filename, statement.path);
+                if (lookup.isCached(fullpath)) {
                     continue;
+                } else {
+                    lookup.cache(fullpath);
                 }
 
-                const base      = modcache.path(statement.path);
-                const extension = findAddition(statement.path);
+                const extension = path.extname(fullpath);
                 var ctrl, gen, api;
                 if (extension === '.' + ext) {
-                    ctrl = parser.parseFile(`${base}${extension}`, {
+                    ctrl = parser.parseFile(fullpath, {
                         browser: {
                             root: false
                         }
                     });
 
-                    gen = ctrl.tree.getImports(modcache);
+                    gen = ctrl.tree.getImports();
                     api = ctrl.tree;
                 } else {
-                    ctrl = jsCompiler.parse(`${base}${extension}`);
-                    gen = ctrl.getImports(modcache);
+                    ctrl = jsCompiler.parse(fullpath);
+                    gen = ctrl.getImports();
                     api = ctrl;
                 }
 
-
-                modcache.startModule(statement.path);
-                yield*  gen;
-                modcache.endModule();
+                yield* gen;
                 yield [
-                    modcache.path(statement.path),
+                    fullpath,
                     api
                 ];
             }
@@ -639,7 +637,7 @@ export class Program extends Scope {
         const instructions      = [
             statement(new js.Literal('use strict'))
         ];
-        const directives        = [
+        const directives = [
         ];
         
         globalHash(LIB_PATH);
@@ -649,7 +647,7 @@ export class Program extends Scope {
             modmap.set(hash, program);
         }
 
-        EXP = globalVar('exports');
+        o.exportVar = globalVar('exports');
         LIB = globalVar('bzbSupportLib');
         
         
@@ -708,6 +706,7 @@ export class Program extends Scope {
     }
     
     compileBrowserModule(o) {
+        o.exportVar = globalVar('exports')
         var instructions = [];
 
         for (let jsline of this.getJSLines(o)) {
@@ -721,18 +720,17 @@ export class Program extends Scope {
 
         return new js.FunctionExpression(
             null,
-            [new js.Identifier(EXP)],
+            [new js.Identifier(o.exportVar)],
             new js.BlockStatement(instructions)
             );
     }
     
     runtimeCompile(o) {
         LIB = nuVar('bzbSupportLib');
-        EXP = nuVar('moduleExports');
         var instructions = statement([
             new js.Literal("use strict"),
             getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal(LIB_PATH)]), 'const'),
-            getJSDeclare(new js.Identifier(EXP, false), getJSMethodCall([LIB, 'module'], [])),
+            EMPTY,
             EMPTY,
             EMPTY,
         ]) || o.instructions;
@@ -741,22 +739,16 @@ export class Program extends Scope {
             instructions.push(jsline);
         }
 
-        instructions.append(statement([
-            new js.AssignmentExpression(
-                '=',
-                getJSMemberExpression(['module', 'exports']),
-                new js.Identifier(EXP)
-                )
-        ]));
-
-        instructions.append(statement(
-            new js.AssignmentExpression(
-                '=',
-                getJSMemberExpression(['global', 'main']),
-                new js.Identifier('main')
-                )
-            )
-            );
+        if (this.containsMain)
+            instructions.append(
+                statement(
+                    new js.AssignmentExpression(
+                        '=',
+                        getJSMemberExpression([o.exportVar, o.exportVar]),
+                        new js.Identifier('main')
+                        )
+                    )
+                );
         
 
         if (this._opvars.length > 0)
@@ -1471,12 +1463,12 @@ export class Super extends Statement {
 }
 
 export class ClassExpression extends Expression {
-	constructor(id = null, superClass = null, body = []) {
+	constructor(identifier = null, superClass = null, body = []) {
 		super();
 		
-		setParent([id, superClass, body], this);
+		setParent([identifier, superClass, body], this);
 		
-		this.id = id;
+		this.identifier = identifier;
 		this.superClass = superClass;
 		this.body = body;
 	}
@@ -1517,8 +1509,8 @@ export class ClassExpression extends Expression {
 	    let cls         = new js.ClassExpression(null, superClass, body);
 	    
 	    if (props.length === 0 && statprops.length === 0) {
-	        if (defined(this.id)) {
-	            return getJSAssign(this.id.name, cls, 'const');
+	        if (defined(this.identifier)) {
+	            return getJSAssign(this.identifier.name, cls, 'const');
 	        } else {
 	            return cls;
 	        }
@@ -1534,8 +1526,8 @@ export class ClassExpression extends Expression {
 	                );
 	        }
 	        
-	        if (defined(this.id)) {
-	            return getJSAssign(this.id.name, rapper, 'const');
+	        if (defined(this.identifier)) {
+	            return getJSAssign(this.identifier.name, rapper, 'const');
 	        } else {
 	            return rapper;
 	        }
@@ -1543,8 +1535,8 @@ export class ClassExpression extends Expression {
 	}
 	
 	* extractVariables() {
-	    if (defined(this.id)) {
-	        yield this.id.name;
+	    if (defined(this.identifier)) {
+	        yield this.identifier.name;
 	    } else {
 	        this.error('Cannot extract name from anonymous class!');
 	    }
@@ -1604,13 +1596,7 @@ export class FunctionDeclaration extends Declaration {
         this.func = func;
     }
     
-    _toJS(o) {
-        if (this.parent instanceof Program &&
-            this.identifier.name === 'main') {
-            
-            this.program.containsMain = true;
-        }
-        
+    _toJS(o) {        
         if (this.parent instanceof Property)
             return new js.Property(
                 this.identifier,
@@ -2387,31 +2373,42 @@ export class NumberLiteral extends Literal {
     }
 }
 
-
-
-export class All extends Node {
-}
-
-// a <id or *> as <id> pattern
-export class ModuleAlias extends Node {
-    constructor(origin, target) {
+export class ModuleSpecifier extends Statement {
+    constructor(local) {
         super();
-        setParent([origin, target], this);
-
-
-
-        this.origin = origin;
-        this.target = target;
+        setParent(local, this);
+        this.local = local;
     }
 }
 
-export class ImportStatement extends Statement {
-    constructor(target, path) {
-        super();
-        setParent(target, this);
 
-        this.target = target;
-        this.path = path;
+export class ModuleDeclaration extends Statement {
+
+}
+
+
+export class ImportSpecifier extends ModuleSpecifier {
+    constructor(imported, local = null) {
+        super(local || imported);
+        setParent(imported, this);
+
+        this.imported = imported;
+    }
+}
+
+export class ImportNamespaceSpecifier extends ModuleSpecifier {
+}
+
+export class ImportDefaultSpecifier extends ModuleSpecifier {
+}
+
+export class ImportDeclaration extends ModuleDeclaration {
+    constructor(specifiers, source) {
+        super();
+        setParent(specifiers, this);
+
+        this.specifiers = specifiers;
+        this.path = source;
     }
 
     requireDefault() {
@@ -2424,187 +2421,242 @@ export class ImportStatement extends Statement {
 
     // generate require code for 
     require() {
-        if (this.program.parameters.browser) {
-            return getJSMethodCall([LIB, 'require'], [
-                new js.Literal(globalHash(this.program.resolve(this.path)))
-            ]);
-        }
-        
-        if (this.path[0] === '.') {
-            return getJSMethodCall([LIB, 'require'], [
-                new js.Identifier('__dirname'),
-                new js.Literal(this.path)
-            ]);            
-        } else {
-            return getJSMethodCall(['require'], [new js.Literal(this.path)]);
-        }
+        return getJSMethodCall([LIB, 'require'], [
+            new js.Literal(+globalHash(this.program.resolve(this.path)))
+        ]);
     }
 
-    _toJS(o) {
-        
-        if (this.target instanceof ModuleAlias) { 
-            // for: import <somevar or wildcard> as <some var or pattern> from <path> ... cases
-            
-            let id = this.target.origin;
-            let tg = this.target.target;
 
-            if (id instanceof All) {
-                return getJSDeclare(new js.Identifier(tg.name), this.require(), 'const');
-            } else {
-                if (tg instanceof Pattern) {
-                    let vname = nuVar('patternPlaceholder');
-                    let vvalue = new js.Identifier(vname);
-                    let def = getJSDeclare(vvalue, this.requireDefault(), 'let');
-                    let vars = getJSDeclare(tg, vvalue.toJS({}), 'const');
-                    return [
-                        def,
-                        vars
-                    ];
-                } else {
-                    return getJSDeclare(tg, this.requireDefault(), 'const');
-                }
-            }
+    _toJS(o) {
+        const support = o.importVar || globalVar('bzbSupportLib');
+        const requiring = this.require();
+
+        const declarators = [];
+        let ivar;
+        if (this.specifiers.length === 1) {
+            ivar = requiring;
         } else {
-            
-            // for cases like import {....} from <path>
-            if (this.target instanceof Array) {
-                let varname     = nuVar('imports');
-                let list        = [
-                    getJSDeclare(
-                        new js.Identifier(varname),
-                        this.require(),
-                        'const'
+            ivar = new js.Identifier(nuVar('imports'));
+
+            declarators.push(
+                new js.VariableDeclarator(
+                    ivar,
+                    requiring
+                    )
+                );
+        }
+
+        for (var specifier of this.specifiers) {
+            if (specifier instanceof ImportDefaultSpecifier) {
+                declarators.push(
+                    new js.VariableDeclarator(
+                        new js.Identifier(specifier.local.name),
+                        new js.MemberExpression(
+                            ivar,
+                            getJSMemberExpression([
+                                support,
+                                'symbols',
+                                'default'
+                                ]),
+                            true
+                            )
                         )
-                    ];
-                for (let alias of this.target) {
-                    if (alias instanceof Identifier) {
-                        list.push(
-                            getJSDeclare(
-                                alias,
-                                getJSMemberExpression([varname, alias.name]),
-                                'const')
-                            );
-                        continue;
-                    }
-                    
-                    // for: .. {..., someVar as someVarOrPattern,...} .. cases
-                    if (alias instanceof ModuleAlias) {
-                        if (alias.origin instanceof All) {
-                            alias.origin.error( // can't have: import {..., * as someVarOrPattern,...} ....
-                                "Wildcard not allowed in import list alias!");
-                        }
-                        
-                        if (alias.origin instanceof Identifier ||
-                            alias.origin instanceof ModuleAlias) {
-                            
-                            list.push(
-                                getJSDeclare(
-                                    alias.target,
-                                    alias.origin.toJS(o),
-                                    'const'
-                                    )
-                                );
-                            
-                            continue;
-                        }
-                        
-                        alias.origin.error(
-                            'Unrecognized import alias origin type!');
-                    }
-                }
-                
-                return list;
-            } else if (this.target instanceof Identifier) {
-                return getJSDeclare(this.target, this.requireDefault(), 'const');
+                    );
+            } else if (specifier instanceof ImportNamespaceSpecifier) {
+                declarators.push(
+                    new js.VariableDeclarator(
+                        new js.Identifier(specifier.local.name),
+                        ivar
+                        )
+                    );
+            } else {
+                declarators.push(
+                    new js.VariableDeclarator(
+                        new js.Identifier(specifier.local.name),
+                        new js.MemberExpression(ivar, specifier.imported)
+                        )
+                    );
             }
         }
+        
+        return new js.VariableDeclaration(
+            declarators,
+            'const'
+            );
     }
 }
 
-export class ExportStatement extends Statement {
-    constructor(target, isdefault = false) {
-        super();
-        setParent(target, this);
+class ExportDeclaration extends ModuleDeclaration {
 
-        this.target = target;
-        this.isdefault = isdefault;
+}
+
+export class ExportSpecifier extends ModuleSpecifier {
+    constructor(local, exported = null) {
+        super(local);
+        setParent(local, this);
+
+        this.exported = exported || local;
+    }
+}
+
+export class ExportNamedDeclaration extends ExportDeclaration {
+    constructor(declaration, specifiers, source = null) {
+        super();
+        setParent([declaration, specifiers], this);
+
+        this.declaration = declaration;
+        this.specifiers = specifiers;
+        this.path = source;
     }
 
     _toJS(o) {
-        if (this.isdefault) {
-            return new js.AssignmentExpression(
-                '=',
-                new js.MemberExpression(
-                    new js.Identifier(EXP),
-                    getJSMemberExpression([LIB, 'symbols', 'default']),
-                    true
-                    ),
-                this.target.toJS(o)
-                );
-        } else {
-            if (this.target instanceof Array) {
-                let list = [];
-                for (let alias of this.target) {
-                    if (alias instanceof ModuleAlias) {
-                        if (alias.origin instanceof All) {
-                            alias.origin.error(
-                                "Wildcard not allowed in export list alias!");
-                        }
-                        
-                        if (alias.target instanceof Pattern) {
-                            alias.target.error(
-                                "Pattern not allowed as export alias target!");
-                        }
-                        
-                        if (alias.target instanceof Identifier) {
-                            list.push(new js.AssignmentExpression(
-                                '=',
-                                getJSMemberExpression([EXP, alias.target.name]),
-                                alias.origin.toJS(o)
-                                )
-                            );
-                        } else alias.target.error('Unrecognized token, only identifiers allowed!');
-                        
-                        continue;
-                    }
-                    
-                    if (alias instanceof Identifier) {
-                        list.push(new js.AssignmentExpression(
+        const lines = [];
+        const gvar = o.exportVar || globalVar('exports');
+        if (this.declaration === null) {
+            for (var specifier of this.specifiers) {
+                lines.push(
+                    new js.ExpressionStatement(
+                        new js.AssignmentExpression(
                             '=',
-                            getJSMemberExpression([EXP, alias.name]),
-                            alias.toJS(o)
+                            getJSMemberExpression(
+                                [gvar, specifier.exported.name]
+                                ),
+                            new js.Identifier(specifier.local.name)
+                            )
+                        )
+                    );
+            }
+        } else {
+            const declaration = this.declaration;
+            if (declaration instanceof VariableDeclaration) {
+                lines.push(declaration.toJS(o));
+                for (var declarator of declaration.declarators) {
+                    if (declarator.id instanceof Pattern)
+                        throw new Error('Pattern exports not yet implemented!');
+
+                    lines.push(
+                        new js.ExpressionStatement(
+                            new js.AssignmentExpression(
+                                '=',
+                                getJSMemberExpression(
+                                    [gvar, declarator.id.name]
+                                    ),
+                                new js.Identifier(declarator.id.name)
+                                )
                             )
                         );
-                    }
                 }
             } else {
-                let list = [];
-                if (this.target instanceof FunctionDeclaration) {
-                    const scope = this.getParentScope();
-                    const name = this.target.identifier.name;
+                let name = declaration.identifier.name;
+                if (declaration instanceof FunctionDeclaration) {
+                    const scope = this.program;
                     
                     if (scope._funcDeclarations.has(name)) {
-                        this.target.error('Cannot declare function more than once!');
+                        declaration.error('Cannot declare function more than once!');
                     }
                     
                     scope._funcDeclarations.set(
                         name,
-                        this.target.func.toJS(o)
+                        declaration.func.toJS(o)
                         );
                 } else {
-                    list.push(this.target.toJS(o))   
-                }
-                
-                for (let name of this.target.extractVariables()) {
-                    let left = getJSMemberExpression([EXP, name]);
-                    let right = new js.Identifier(name);
-                    list.push(
-                        new js.AssignmentExpression('=', left, right)
-                        );
+                    lines.push(declaration.toJS(o));
                 }
 
-                return list;
+                lines.push(
+                    new js.ExpressionStatement(
+                        new js.AssignmentExpression(
+                            '=',
+                            getJSMemberExpression([gvar, name]),
+                            new js.Identifier(name)
+                            )
+                        )
+                    );
+            }
+        }
+
+        return lines;
+    }
+}
+
+
+export class ExportDefaultDeclaration extends ExportDeclaration {
+    constructor(declaration) {
+        super();
+        setParent(declaration, this);
+
+        this.declaration = declaration;
+    }
+
+    _toJS(o) {
+        const exportVar = o.exportVar || globalVar('exports');
+        const bzbVar = LIB;
+        if (this.declaration instanceof Expression) {
+            return new js.ExpressionStatement(
+                new js.AssignmentExpression(
+                    '=',
+                    new js.MemberExpression(
+                        new js.Identifier(exportVar),
+                        getJSMemberExpression([
+                            bzbVar,
+                            'symbols',
+                            'default'
+                            ]),
+                        true
+                        ),
+                    line.declaration
+                    )
+                );
+        } else {
+            const name = this.declaration.identifier.name;
+            if (this.declaration instanceof FunctionDeclaration) {
+                const scope = this.program;
+                
+                if (scope._funcDeclarations.has(name)) {
+                    this.declaration.error('Cannot declare function more than once!');
+                }
+                
+                scope._funcDeclarations.set(
+                    name,
+                    this.declaration.func.toJS(o)
+                    );
+
+                return new js.ExpressionStatement(
+                    new js.AssignmentExpression(
+                        '=',
+                        new js.MemberExpression(
+                            new js.Identifier(exportVar),
+                            getJSMemberExpression([
+                                bzbVar,
+                                'symbols',
+                                'default'
+                                ]),
+                            true
+                            ),
+                        new js.Identifier(name)
+                        ),
+                    );
+            } else {
+                return [
+                    this.declaration.toJS(o),
+                    new js.ExpressionStatement(
+                        new js.AssignmentExpression(
+                            '=',
+                            new js.MemberExpression(
+                                new js.Identifier(exportVar),
+                                getJSMemberExpression([
+                                    bzbVar,
+                                    'symbols',
+                                    'default'
+                                    ])
+                                ),
+                                true
+                            ),
+                            new js.Identifier(name)
+                        )
+                ]
             }
         }
     }
 }
+

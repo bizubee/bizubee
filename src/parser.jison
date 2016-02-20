@@ -70,8 +70,8 @@ Program:
 
 Line:
     Super
-|   ImportStatement
-|   ExportStatement
+|   ImportDeclaration
+|   ExportDeclaration
 |   Statement
 ;
 
@@ -514,49 +514,89 @@ CallExpression:
 |   'NEW' WrappedExpression 'Q_CALL' Arguments      { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
 ;
 
+
+
+
 Path:
     'PATH'      { $$ = $1.value}
 ;
 
-ImportListLines:
-    'MOD_LEFT' Identifier                   { $$ = [$2] }
-|   'MOD_LEFT' ModuleAlias                  { $$ = [$2] }
-|   ImportListLines Separator Identifier    { $$ = $1.concat($3) }
-|   ImportListLines Separator ModuleAlias   { $$ = $1.concat($3) }
+SpecifierLines:
+    ImportSpecifier                         { $$ = [$1]}
+|   SpecifierLines ',' ImportSpecifier      { $$ = $1.concat($3)}
+|   SpecifierLines 'ENDLN' ImportSpecifier  { $$ = $1.concat($3)}
+;
+
+ImportSpecifier:
+    Identifier 'AS' Identifier  { $$ = new yy.ImportSpecifier($1, $3).pos(@$)}
+|   Identifier        { $$ = new yy.ImportSpecifier($1, $1).pos(@$)}
+;
+
+ImportNamespaceSpecifier:
+    'ALL' 'AS' Identifier    { $$ = new yy.ImportNamespaceSpecifier($3).pos(@$)}
+;
+
+ImportDefaultSpecifier:
+    Identifier      { $$ = new yy.ImportDefaultSpecifier($1).pos(@$)}
 ;
 
 ImportList:
-    ImportListLines 'MOD_RIGHT'         { $$ = $1 }
+    'MOD_LEFT' SpecifierLines 'MOD_RIGHT'  { $$ = $2 }
 ;
 
-ModuleAlias:
-    'ALL' 'AS' Identifier           { $$ = new yy.ModuleAlias(new yy.All().pos(@1), $3).pos(@$)}
-|   Identifier 'AS' Assignable         { $$ = new yy.ModuleAlias($1, $3).pos(@$)}
+ImportDeclaration:
+    'IMPORT' ImportNamespaceSpecifier 'FROM' Path
+        {$$ = new yy.ImportDeclaration([$2], $4).pos(@$)}
+|   'IMPORT' ImportDefaultSpecifier 'FROM' Path
+        {$$ = new yy.ImportDeclaration([$2], $4).pos(@$)}
+|   'IMPORT' ImportList 'FROM' Path
+        {$$ = new yy.ImportDeclaration($2, $4).pos(@$)}
+|   'IMPORT' ImportDefaultSpecifier ',' ImportNamespaceSpecifier 'FROM' Path
+        {$$ = new yy.ImportDeclaration([$2, $4], $6).pos(@$)}
+|   'IMPORT' ImportDefaultSpecifier ',' ImportList 'FROM' Path
+        {$$ = new yy.ImportDeclaration([$2].concat($4), $6).pos(@$)}
 ;
 
-ImportStatement:
-    'IMPORT' Identifier 'FROM' Path                     { $$ = new yy.ImportStatement($2, $4).pos(@$)}
-|   'IMPORT' ModuleAlias 'FROM' Path                    { $$ = new yy.ImportStatement($2, $4).pos(@$)}
-|   'IMPORT' ImportList 'FROM' Path                     { $$ = new yy.ImportStatement($2, $4).pos(@$)}
+
+
+ExportDeclaration:
+    ExportNamedDeclaration
+|   ExportDefaultDeclaration
 ;
 
 
-ExportListLines:
-    'EXP_LEFT' Identifier                   { $$ = [$2] }
-|   'EXP_LEFT' ModuleAlias                  { $$ = [$2] }
-|   ExportListLines Separator Identifier    { $$ = $1.concat($3) }
-|   ExportListLines Separator ModuleAlias   { $$ = $1.concat($3) }
+ExportSpecifier:
+    Identifier                  { $$ = new yy.ExportSpecifier($1, $1).pos(@$)}
+|   Identifier 'AS' Identifier  { $$ = new yy.ExportSpecifier($1, $3).pos(@$)}
 ;
 
-ExportList:
-    ExportListLines 'EXP_RIGHT'         { $$ = $1 }
+ExportSpecifiers:
+    ExportSpecifier                             { $$ = [$1]}
+|   ExportSpecifiers ',' ExportSpecifier        { $$ = $1.concat($3)}
+|   ExportSpecifiers 'ENDLN' ExportSpecifier    { $$ = $1.concat($3)}
 ;
 
-ExportStatement:
-    'EXPORT' VariableDeclaration                { $$ = new yy.ExportStatement($2).pos(@$)}
-|   'EXPORT' FunctionDeclaration                { $$ = new yy.ExportStatement($2).pos(@$)}
-|   'EXPORT' ClassDeclaration                   { $$ = new yy.ExportStatement($2).pos(@$)}
-|   'EXPORT' ExportList                         { $$ = new yy.ExportStatement($2).pos(@$)}
-|   'EXPORT' 'DEFAULT' Expression               { $$ = new yy.ExportStatement($3, true).pos(@$)}
+ExportNamedDeclaration:
+    'EXPORT' VariableDeclaration
+        { $$ = new yy.ExportNamedDeclaration($2, []).pos(@$)}
+|   'EXPORT' FunctionDeclaration
+        { $$ = new yy.ExportNamedDeclaration($2, []).pos(@$)}
+|   'EXPORT' ClassDeclaration                   
+        { $$ = new yy.ExportNamedDeclaration($2, []).pos(@$)}
+|   'EXPORT' 'EXP_LEFT' ExportSpecifiers 'EXP_RIGHT'                  
+        { $$ = new yy.ExportNamedDeclaration(null, $3).pos(@$)}
 ;
+
+ExportDefaultDeclaration:
+    'EXPORT' 'DEFAULT' Expression
+        { $$ = new yy.ExportDefaultDeclaration($3).pos(@$)}
+|   'EXPORT' 'DEFAULT' FunctionDeclaration
+        { $$ = new yy.ExportDefaultDeclaration($3).pos(@$)}
+|   'EXPORT' 'DEFAULT' ClassDeclaration   
+        { $$ = new yy.ExportDefaultDeclaration($3).pos(@$)}
+;
+
+
+
+
 

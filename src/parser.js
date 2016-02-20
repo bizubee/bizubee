@@ -3,6 +3,7 @@
 var fs 			= require('fs');
 var vm			= require("vm");
 var escodegen	= require('escodegen');
+var esvalid		= require('esvalid');
 var parser 		= require('./generated-parser');
 var lexer 		= require('./lexer');
 var sources		= require('./source');
@@ -20,11 +21,12 @@ function control(tokens, parameters) {
 			
 			return tree;
 		},
-		getJSTree() {
-			return this.tree.toJS({});
+		getJSTree(o) {
+			return this.tree.toJS(o || {});
 		},
-		getJSText() {
-			return escodegen.generate(this.tree.toJS({}));
+		getJSText(o) {
+			const parsed = this.tree.toJS(o || {});
+			return escodegen.generate(parsed);
 		},
 		get api() {
 			return this.tree.api;

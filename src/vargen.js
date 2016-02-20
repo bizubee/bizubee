@@ -2,15 +2,17 @@
 const varset 	= new Set();
 const globals	= new Map();
 const hashes	= new Map();
-
+const reverser	= new Map();
 var counter = 0;
 
 function nuVar(base) {
-	var varname = base;
+	base = base || "op";
+	var i = 0, varname;
 	do {
-		varname = `_${varname}`;
+		varname = `_${base}_${i}`;
+		i++;
 	} while (varset.has(varname));
-
+	exports.forbid(varname);
 	return varname;
 }
 
@@ -35,6 +37,11 @@ module.exports.globalHash = (text) => {
 		return hashes.get(text);
 	} else {
 		hashes.set(text, counter);
+		reverser.set(counter, text);
 		return counter++;
 	}
+}
+
+module.exports.globalUnhash = (n) => {
+	return reverser.get(n);
 }

@@ -872,6 +872,7 @@ filters.push(function* (gen) {
 
 		if (val.tag === '{') {
 			val.tag = 'EXP_LEFT';
+			yield val;
 			let end = yield* getEnd(gen, '{');
 			end.tag = 'EXP_RIGHT';
 			yield end;

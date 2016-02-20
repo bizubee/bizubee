@@ -8,28 +8,28 @@ const parser   	= require('./parser');
 const jsParser	= require('./js-compiler');
 const support	= require('./fragments/lib');
 const Module	= require('module');
+const lookup	= require('./lookup');
+const vargen	= require('./vargen');
+
 const cache 	= new Map();
 
-
-const ext = 'jsl';
+const ext = lookup.extension;
 
 exports.extension = ext;
 
-// bastardized version of require that works directly with bizubee files
-support.require = function(dirpath, file) {
-	if (file === 'bizubee lib') {
-		return support;
-	}
-	
-	let abspath = path.resolve(`${dirpath}/${file}`);	// absolute path
+support.require = function(n) {
+	if (cache.has(n)) {
+		return cache.get(n);
+	} else {
+		let fullPath = vargen.globalUnhash(n);
+		if (fullPath === 'bizubee lib') {
+			return support;
+		}
 
-	if (cache.has(abspath)) {
-		return cache.get(abspath);
+	    let result = runFileInNewContext(fullPath, {}, true);
+	    cache.set(n, result.exports);
+	    return result.exports;
 	}
-
-    let ctx = runFileInNewContext(abspath);
-    cache.set(abspath, ctx.exports);
-    return ctx.exports;
 }
 
 support.module = function() {
@@ -82,7 +82,7 @@ function createContext(filename, ctxt) {
 
 		mdl.paths = paths;
 	    ctx.__dirname = dir;
-	    ctx.__filename = path.basename(filename);
+	    ctx.__filename = filename;
 
 	    ctx.require = function(mod) {
 		    if (mod === 'bizubee lib') {
@@ -114,7 +114,11 @@ exports.module = function() {
 	return {};
 }
 
-function runFileInNewContext(filepath, ctxt, runtime) {
+function main() {
+	// default main function
+}
+
+function runFileInNewContext(filepath, ctxt, mod) {
 
     let abspath         = path.resolve(filepath);
 	let dirname	        = path.dirname(abspath);
@@ -122,26 +126,34 @@ function runFileInNewContext(filepath, ctxt, runtime) {
 	let dirFiles        = new Set(fs.readdirSync(dirname));
     let ctx             = createContext(abspath, ctxt);
     
-    let js, jsPath;
+    let js, jsPath, exportVar;
 
 	if (extension === '.js') {
 		if (dirFiles.has(abspath))
 			throw new Error(`File "${abspath}" not found!`);
         let ctrl    = jsParser.parse(abspath, true);
-        js          = ctrl.getJSText({exportVar: 'exports'});
+
+        exportVar 	= vargen.nuVar('exports');
+        js          = ctrl.getJSText({exportVar});
         jsPath		= abspath;
 	} else {
-		let realPath	= `${abspath}.${ext}`;
-		if (dirFiles.has(realPath))
+		if (dirFiles.has(abspath))
 			throw new Error(`File "${abspath}" not found!`);
-        let ctrl    	= parser.parseFile(realPath, {});
-        js          	= ctrl.getJSText();
-        jsPath			= `${realPath}.js`;
+        let ctrl    	= parser.parseFile(abspath, {});
+        
+        exportVar 		= vargen.nuVar('exports');
+        js          	= ctrl.getJSText({exportVar});
+        jsPath			= `${abspath}.js`;
 	}
     
-    ctx.exports = {};
+    if (mod) ctx[exportVar] = {};
+    else ctx[exportVar] = {[exportVar]: main};
     vm.runInNewContext(js, ctx, jsPath);
-    return ctx;
+    return {
+    	context: ctx,
+    	exports: (mod) ? ctx[exportVar] : undefined,
+    	main: (!mod) ? ctx[exportVar][exportVar] || empty : undefined
+    }
 }
 
 exports.runFileInNewContext = runFileInNewContext;
