@@ -25,12 +25,12 @@ class CharSource {
 exports.FileSource = class extends CharSource {
 	constructor(path) {
 		super();
-
 		var fd = fs.openSync(path, 'r');
 		var stats = fs.fstatSync(fd);
 		this._fd 		= fd;
 		this._buff 		= new Buffer(stats.size);
 		this._progress 	= 0;
+		this.filename 	= path;
 	}
 
 	get(i) {

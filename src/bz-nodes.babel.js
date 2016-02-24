@@ -4,7 +4,6 @@ import escodegen from 'escodegen';
 import pathlib from 'path'
 import fs from 'fs';
 import path from 'path';
-import {addSpacing, repeat} from './format';
 import {Lines, Line} from './errors';
 import {Queue} from './collectibles';
 import {findAddition} from './extensions';
@@ -371,36 +370,9 @@ export class Node {
     error(text) {
         let loc = this[POSITION_KEY];
         let x = loc.first_column, y = loc.first_line;
-        let lines = new Lines(this.source, 4), i = 0;
-        let output = this.program.parameters.output || console;
+        let lines = new Lines(this.source, 4);
 
-        if (this.program.parameters.throwSyntax) {
-            if (this.filename === null)
-                throw new Error(`Syntax error at position ${x},${y+1} in VM:\n\t${text}`);
-            else
-                throw new Error(`Syntax error at position ${x},${y+1} in file '${this.filename}':\n\t${text}`);
-        }
-        
-        if (this.filename === null) output.log(`SyntaxError: ${text}\n\ton line ${y + 1} in VM:`);
-        else output.log(`SyntaxError: ${text}\n\ton line ${y + 1} in file '${this.filename}'`);
-        output.log();
-        output.log();
-
-
-        for (let line of lines) {
-            if (Math.abs(i - y) < 4) {
-                output.log(`${addSpacing(i + 1, 6)}|\t\t${line.untabbed}`);
-
-                if (i === y) {
-                    let offset = line.map(x);
-                    output.log(`${addSpacing('', 6)} \t\t${repeat(' ', offset)}^`);
-                }
-            }
-
-            i++;
-        }
-
-        process.exit();
+        lines.error(text, [x, y]);
     }
 
     get parent() {

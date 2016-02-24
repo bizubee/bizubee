@@ -7,11 +7,12 @@ var escodegen	= require('escodegen');
 var esvalid		= require('esvalid');
 var parser 		= require('./generated-parser');
 var lexer 		= require('./lexer');
+var errors		= require('./errors');
 var sources		= require('./source');
 var nodes 		= require('./bz-nodes');
 
 function control(tokens, parameters) {
-	let psr = getParser();
+	let psr = getParser(parameters.source);
 	let tree = null;
 	let jstree = null;
 	return {
@@ -76,9 +77,15 @@ function control(tokens, parameters) {
 }
 
 
-function getParser() {
+function getParser(source) {
 	let psr = new parser.Parser();
 	psr.yy = nodes;
+	psr.yy.parseError = function(message, ob) {
+		const lines = new errors.Lines(source, 4);
+		const x		= ob.loc.last_column;
+		const y		= ob.loc.last_line;
+		lines.error(`Unexpected token "${ob.token}"`, [x, y]);
+	}
 	return psr;
 }
 
