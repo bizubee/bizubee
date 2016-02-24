@@ -83,7 +83,9 @@ const ops = [
     ['t', 'target', 'Specify target for file compilation output (defaults to <filename>.js)'],
     ['m', 'mapfile', 'Specify custom mapfile name when compiling'],
     ['v', 'version', 'Show version of bizubee'],
-    ['h', 'help', 'Shows this list of commands and information']
+    ['h', 'help', 'Shows this list of commands and information'],
+    ['a', 'ast', 'Outputs bizubee AST for given file'],
+    ['A', 'ast-js', 'Outputs javascript AST for given program'],
 ];
 
 const short = {}, long = {};
@@ -113,16 +115,34 @@ if (args._.length === 1 && oplen === 0) {
         const relpth    = `${stripExt(get('c'))}.${ext}`;
         const abspth    = path.resolve(process.cwd(), relpth);
         const ctrl      = parser.parseFile(abspth, {
+            rootfile: abspth,
             browser: {
                 root: true
             }
         });
-        const jstext    = ctrl.getJSText();
         
-        if (has('t')) {
-            fs.writeFileSync(path.resolve(process.cwd(), get('t')), jstext, 'utf8');
+        if (has('a')) {
+            console.log(JSON.stringify(ctrl.tree, null, 4));
+            process.exit(0);
+        }
+
+        if (has('A')) {
+            console.log(JSON.stringify(ctrl.getJSTree(), null, 4));
+            process.exit(0);
+        }
+
+
+        const jstext    = ctrl.getJSText();
+        const tname     = has('t') ? get('t') : `${relpth}.js`;
+
+        if (has('m')) {
+            const mappath = `${tname}.map`;
+            const srcmap = ctrl.getMap(mappath);
+            const mapcom = `//# sourceMappingURL=${path.basename(mappath)}`;
+            fs.writeFileSync(mappath, srcmap.toString(), 'utf8');
+            fs.writeFileSync(tname, `${jstext}\n\n${mapcom}`, 'utf8');            
         } else {
-            fs.writeFileSync(`${relpth}.js`, jstext, 'utf8');
+            fs.writeFileSync(tname, jstext, 'utf8');            
         }
         
         process.exit(0);

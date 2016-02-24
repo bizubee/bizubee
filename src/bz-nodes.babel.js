@@ -193,17 +193,6 @@ function assertUpdateOperator(operator) {
     }
 }
 
-function setParent(subject, parent) {
-    if (subject instanceof Array) {
-        let i = subject.length;
-        while (i --> 0) {
-            setParent(subject[i], parent);            
-        }
-    } else if (subject instanceof Node) {
-        subject[PARENT_KEY] = parent;
-    }
-}
-
 
 function statement(jsExpr) {
     if (jsExpr instanceof Array) {
@@ -244,14 +233,33 @@ export function wrap(node) {
 
 
 export class Node {
-    constructor(loc = null) {
-        setParent(this, null);
-
+    constructor() {
         this[IGNORE] = new Set();
         this.type = this.constructor.name;
         this.loc = null;
         this.compiled = false;
         nodeQueue.eat(this);
+    }
+
+    setParent() {
+        for (var key in this) {
+            const nd = this[key];
+            if (nd instanceof Node) {
+                nd[PARENT_KEY] = this;
+                nd.setParent();
+                continue;
+            }
+
+            if (nd instanceof Array) {
+                for (let node of nd) {
+                    if (node instanceof Node) {
+                        node[PARENT_KEY] = this;
+                        node.setParent();
+                    }
+                }
+                continue;
+            }
+        }
     }
 
     getOpvars(n) {
@@ -364,7 +372,7 @@ export class Node {
         let loc = this[POSITION_KEY];
         let x = loc.first_column, y = loc.first_line;
         let lines = new Lines(this.source, 4), i = 0;
-        let output = this.program.parameters.output;
+        let output = this.program.parameters.output || console;
 
         if (this.program.parameters.throwSyntax) {
             if (this.filename === null)
@@ -409,6 +417,11 @@ export class Node {
                 return current;
             }
 
+            if (current.type === "ExpressionStatement") {
+                if (current.parent === null) {
+                    console.log(JSON.stringify(current, null, 4));
+                }
+            }
             current = current.parent;
         }
     }
@@ -441,11 +454,11 @@ export class Node {
     }
 }
 
+// includes block scopes and the program/module scope
 export class Scope extends Node {
     constructor(statements) {
         super();
-        setParent(statements, this);
-        
+                
         this.body = statements;
         this._opvars = [];
         this._forbiddenvars = new Set();
@@ -569,11 +582,10 @@ export class Scope extends Node {
 export class Program extends Scope {
     constructor(statements) {
         super(statements);
-        setParent(statements, this);
-
+        
+        this.setParent();
 
         this.containsMain = false;
-        
         while (nodeQueue.length > 0) {
             let node = nodeQueue.crap();
             node.onASTBuild({});
@@ -602,6 +614,7 @@ export class Program extends Scope {
                 var ctrl, gen, api;
                 if (extension === '.' + ext) {
                     ctrl = parser.parseFile(fullpath, {
+                        rootfile: this.parameters.rootfile,
                         browser: {
                             root: false
                         }
@@ -624,6 +637,33 @@ export class Program extends Scope {
         }
     }
     
+    * getExports() {
+        for (var statement of this.body) {
+            if (statement instanceof ExportNamedDeclaration) {
+                if (statement.declaration === null) {
+                    for (var spec of statement.specifiers) {
+                        yield [spec.exported.name, spec.local.name];
+                    }
+                } else {
+                    const dec = statement.declaration;
+                    if (dec instanceof VariableDeclaration) {
+                        for (var id of dec.extractVariables()) {
+                            yield [id.name, id.name];
+                        }
+                    } else {
+                        yield [dec.identifier.name, dec.identifier.name]
+                    }
+                }
+            }
+
+            if (statement instanceof ExportDefaultDeclaration) {
+                const hasProp = statement.declaration.hasOwnProperty('identifier');
+                const name = (hasProp) ? statement.declaration.identifier.name : null;
+                yield ["[default]", name];
+            }
+        }
+    }
+
     compileBrowser(o) {
         // recursively resolve libraries
         
@@ -702,7 +742,7 @@ export class Program extends Scope {
                     ]
                     )
                 )
-        ]);
+        ]).from(this);
     }
     
     compileBrowserModule(o) {
@@ -722,7 +762,7 @@ export class Program extends Scope {
             null,
             [new js.Identifier(o.exportVar)],
             new js.BlockStatement(instructions)
-            );
+            ).from(this);
     }
     
     runtimeCompile(o) {
@@ -756,7 +796,7 @@ export class Program extends Scope {
         if (this._funcDeclarations.size > 0)
             instructions[4] = this.getFunctionDeclarations();
 
-        return new js.Program(instructions);
+        return new js.Program(instructions).from(this);
     }
     
     _toJS(o) {
@@ -799,20 +839,20 @@ export class BlockStatement extends Scope {
         if (this._opvars.length > 0)
             instructions.unshift(this.getOpvarsDeclaration());
 
-        return new js.BlockStatement(instructions);
+        return new js.BlockStatement(instructions).from(this);
     }
 }
 
 export class ExpressionStatement extends Statement {
     constructor(expression) {
         super();
-        setParent(expression, this);
-
+        
         this.expression = expression;
     }
 
     _toJS(o) {
-        return new js.ExpressionStatement(this.expression.toJS(o));
+        return new js.ExpressionStatement(this.expression.toJS(o))
+            .from(this);
     }
 }
 
@@ -820,8 +860,7 @@ export class ExpressionStatement extends Statement {
 export class IfStatement extends Statement {
     constructor(test, consequent, alternate = null) {
         super();
-        setParent([test, consequent, alternate], this);
-
+        
         this.test = test;
         this.consequent = consequent;
         this.alternate = alternate;
@@ -835,40 +874,91 @@ export class IfStatement extends Statement {
         if (this.alternate !== null) 
             alternate = this.alternate.toJS(o);
 
-        return new js.IfStatement(test, consequent, alternate);
+        return new js.IfStatement(test, consequent, alternate)
+            .from(this);
     }
 
     setAlternate(alternate) {
-        setParent(alternate, this);
-        this.alternate = alternate;
+                this.alternate = alternate;
 
         return this;
     }
 }
 
-// *
-export class BreakStatement extends Statement {
-    constructor(label = null) {
-        super();
-        setParent(label, this);
-        this.label = label;
+export class ControllStatement extends Statement {
+    _label() {
+        const target = this._target();
+        if (target.label === null) {
+            const label = nuVar('label');
+            target.label = label;
+            return label;
+        } else {
+            return target.label;
+        }
     }
 
-    _toJS(o) {
-        return new js.BreakStatement();
+    _target() {
+        var current = this.parent, n = this.magnitude;
+
+        while (true) {
+            if (
+                current instanceof ForStatement ||
+                current instanceof WhileStatement
+                ) {
+
+                if (n === 0) {
+                    return current;
+                } else {
+                    n--;
+                }
+            } else if (current instanceof FunctionExpression) {
+                this.error('Cannot break/continue outside of function!');
+            } else if (current instanceof Program) {
+                this.error('Not enough nested loops to break/continue from!');
+            }
+
+            current = current.parent;
+        }
     }
 }
 
 // *
-export class ContinueStatement extends Statement {
-    constructor(label = null) {
+export class BreakStatement extends ControllStatement {
+    constructor(magnitude = 0) {
         super();
-        setParent(label, this);
-        this.label = label;
+                this.magnitude = +magnitude;
     }
 
     _toJS(o) {
-        return new js.ContinueStatement();
+        if (this.magnitude === 0) {
+            return new js.BreakStatement()
+                .from(this);            
+        } else {
+            const label = this._label();
+            return new js.BreakStatement(
+                new js.Identifier(label)
+                ).from(this);
+        }
+    }
+}
+
+// *
+export class ContinueStatement extends ControllStatement {
+    constructor(magnitude = 0) {
+        super();
+                this.magnitude = +magnitude;
+    }
+
+    _toJS(o) {
+        if (this.magnitude === 0) {
+            return new js.ContinueStatement()
+                .from(this);            
+        } else {
+            const label = this._label();
+            return new js.ContinueStatement(
+                new js.Identifier(label)
+                ).from(this);
+        }
     }
 }
 
@@ -876,8 +966,7 @@ export class ContinueStatement extends Statement {
 export class SwitchStatement extends Statement {
     constructor(discriminant, cases) {
         super();
-        setParent([discriminant, cases], this);
-        
+                
         this.discriminant = discriminant;
         this.cases = cases;
     }
@@ -887,8 +976,7 @@ export class SwitchStatement extends Statement {
 export class ReturnStatement extends Statement {
     constructor(argument, after) {
         super();
-        setParent(argument, this);
-
+        
         this.argument = argument;
         this.after = after;
     }
@@ -905,13 +993,15 @@ export class ReturnStatement extends Statement {
             ];
             
             lines.append(this.after.toJS(o));
-            lines.append(new js.ReturnStatement(variable));
+            lines.append(new js.ReturnStatement(variable).from(this));
             return statement(lines);
         } else {
             if (defined(this.argument))
-                return new js.ReturnStatement(this.argument.toJS(o));
+                return new js.ReturnStatement(this.argument.toJS(o))
+                    .from(this);
             else
-                return new js.ReturnStatement();
+                return new js.ReturnStatement()
+                    .from(this);
         }
     }
 }
@@ -920,21 +1010,20 @@ export class ReturnStatement extends Statement {
 export class ThrowStatement extends Statement {
     constructor(argument) {
         super();
-        setParent(argument, this);
-
+        
         this.argument = argument;
     }
 
     _toJS(o) {
-        return new js.ThrowStatement(this.argument.toJS(o));
+        return new js.ThrowStatement(this.argument.toJS(o))
+            .from(this);
     }
 }
 
 export class TryStatement extends Statement {
     constructor(block, catchClause = null, finalizer = null) {
         super();
-        setParent([block, catchClause, finalizer], this);
-
+        
         this.block = block;
         this.handler = catchClause;
         this.finalizer = finalizer;
@@ -947,7 +1036,7 @@ export class TryStatement extends Statement {
             this.block.toJS(o),
             handler,
             finalizer
-            );
+            ).from(this);
     }
 }
 
@@ -955,29 +1044,37 @@ export class TryStatement extends Statement {
 export class WhileStatement extends Statement {
     constructor(test, body) {
         super();
-        setParent([test, body], this);
-
+        
         this.test = test;
         this.body = body;
+        this.label = null;
     }
 
     _toJS(o) {
         let test = this.test.toJS(o);
         let body = this.body.toJS(o);
 
-        return new js.WhileStatement(test, body);
+        if (this.label === null) {
+            return new js.WhileStatement(test, body)
+                .from(this);            
+        } else {
+            return new js.LabeledStatement(
+                new js.Identifier(this.label),
+                new js.WhileStatement(test, body)
+                ).from(this);
+        }
     }
 }
 
 export class ForStatement extends Statement {
     constructor(left, right, body, async = false) {
         super();
-        setParent([left, right, body], this);
-
+        
         this.left = left;
         this.right = right;
         this.body = body;
         this.async = async;
+        this.label = null;
     }
 
     _toJS(o) {
@@ -998,7 +1095,16 @@ export class ForStatement extends Statement {
 
         jbody.body.unshift(declare);
 
-        return new js.ForOfStatement(jbody, nuleft, right);
+        let loop = new js.ForOfStatement(jbody, nuleft, right)
+
+        if (this.label === null) {
+            return loop.from(this);
+        } else {
+            return new js.LabeledStatement(
+                new js.Identifier(this.label),
+                loop
+                ).from(this);
+        }
     }
 
     asyncToJS(o) {
@@ -1026,17 +1132,42 @@ export class ForStatement extends Statement {
             body.append(line.toJS(o));
         }
 
-        return [
-            getJSAssign(right, new js.CallExpression(
-                new js.MemberExpression(
-                    this.right.toJS(),
-                    getJSMemberExpression([LIB, 'symbols', 'observer']),
-                    true), []),
-            'const'),
-            new js.WhileStatement(
-                new js.Literal(true),
-                new js.BlockStatement(body))
+
+        let buff = [
+            getJSAssign(
+                right,
+                new js.CallExpression(
+                    new js.MemberExpression(
+                        this.right.toJS(),
+                        getJSMemberExpression([LIB, 'symbols', 'observer']),
+                        true
+                        ),
+                    []
+                    ),
+                'const'
+                ).from(this)
         ];
+
+        if (this.label === null) {
+            buff.push(
+                new js.WhileStatement(
+                    new js.Literal(true),
+                    new js.BlockStatement(body)
+                    ).from(this)
+                );
+        } else {
+            buff.push(
+                new js.LabeledStatement(
+                    new js.Identifier(this.label),
+                    new js.WhileStatement(
+                        new js.Literal(true),
+                        new js.BlockStatement(body)
+                        )
+                    ).from(this)
+                );
+        }
+
+        return buff;
     }
 }
 
@@ -1047,10 +1178,15 @@ export class Declaration extends Statement {
 export class VariableDeclaration extends Declaration {
     constructor(declarators, constant = false) {
         super();
-        setParent(declarators, this);
-
+        
         this.declarators = declarators;
         this.constant = constant;
+    }
+
+    * varnames() {
+        for (var id of this.extractVariables()) {
+            yield id.name;
+        }
     }
 
     * extractVariables() {
@@ -1079,15 +1215,20 @@ export class VariableDeclaration extends Declaration {
             jsvars = jsvars.concat(declarator.toJS(o));
         }
 
-        return new js.VariableDeclaration(jsvars, type);
+        return new js.VariableDeclaration(jsvars, type)
+            .from(this);
+    }
+
+    add(declarator) {
+                this.declarators.push(declarator);
+        return this;
     }
 
     addAndReturn(assignable, assignee) {
         let declarator =
             new VariableDeclarator(assignable, assignee);
 
-        setParent(declarator, this);
-
+        
         this.declarators.push(declarator);
         return this;
     }
@@ -1096,8 +1237,7 @@ export class VariableDeclaration extends Declaration {
 export class VariableDeclarator extends Node {
     constructor(id, init = null) {
         super();
-        setParent([id, init], this);
-
+        
         this.id = id;
         this.init = init;
     }
@@ -1111,14 +1251,18 @@ export class VariableDeclarator extends Node {
                 this.id.error('All pattern declarations must be initialized!');
 
             let nuvar = nuVar('patternPlaceholder');
-            let arr = [new js.VariableDeclarator(new js.Identifier(nuvar), init)];
+            let arr = [
+                new js.VariableDeclarator(new js.Identifier(nuvar), init)
+                    .from(this)
+            ];
 
             for (let pattern of this.id.extractAssigns(new js.Identifier(nuvar))) {
                 arr.push(pattern);
             }
 
             return arr;
-        } else return new js.VariableDeclarator(this.id.toJS(o), init);
+        } else return new js.VariableDeclarator(this.id.toJS(o), init)
+            .from(this);
     }
 }
 
@@ -1141,8 +1285,7 @@ export class ThisExpression extends Expression {
 export class YieldExpression extends Expression {
     constructor(argument = null, delegate = false) {
         super(argument);
-        setParent(argument, this);
-
+        
         this.argument = argument;
         this.delegate = delegate;
     }
@@ -1163,15 +1306,15 @@ export class YieldExpression extends Expression {
         }
 
 
-        return new js.YieldExpression(inyield, this.delegate);
+        return new js.YieldExpression(inyield, this.delegate)
+            .from(this);
     }
 }
 
 export class AwaitExpression extends Expression {
     constructor(argument) {
         super(argument);
-        setParent(argument, this);
-
+        
         this.argument = argument;
     }
 
@@ -1181,15 +1324,15 @@ export class AwaitExpression extends Expression {
             this.error("Await expression only allowed in async function!");
         }
 
-        return new js.YieldExpression(this.argument.toJS());
+        return new js.YieldExpression(this.argument.toJS())
+            .from(this);
     }
 }
 
 export class ArrayExpression extends Expression {
     constructor(elements) {
         super();
-        setParent(elements, this);
-
+        
         this.elements = elements;
     }
 
@@ -1198,15 +1341,15 @@ export class ArrayExpression extends Expression {
         for (let element of this.elements) {
             array.push(element.toJS(o));
         }
-        return new js.ArrayExpression(array);
+        return new js.ArrayExpression(array)
+            .from(this);
     }
 }
 
 export class ObjectExpression extends Expression {
     constructor(properties) {
         super();
-        setParent(properties, this);
-
+        
         this.properties = properties;
     }
 
@@ -1216,7 +1359,8 @@ export class ObjectExpression extends Expression {
             props.push(prop.toJS(o));
         }
 
-        return new js.ObjectExpression(props);
+        return new js.ObjectExpression(props)
+            .from(this);
     }
 }
 
@@ -1229,8 +1373,7 @@ export class Assignable extends Node {
 export class Property extends Node {
     constructor(key, value, kind = 'init') {
         super();
-        setParent([key, value], this);
-
+        
         this.key = key;
         this.value = value;
         this.kind = kind;
@@ -1241,20 +1384,20 @@ export class Property extends Node {
             this.key.toJS(o),
             this.value.toJS(o),
             this.kind
-            );
+            ).from(this);
     }
 }
 
 export class SpreadElement extends Node {
     constructor(value) {
         super();
-        setParent(value, this);
-
+        
         this.value = value;
     }
 
     _toJS(o) {
-        return new js.SpreadElement(this.value.toJS(o));
+        return new js.SpreadElement(this.value.toJS(o))
+            .from(this);
     }
 }
 
@@ -1274,8 +1417,7 @@ export class Pattern extends Node {
 export class SpreadPattern extends Pattern {
     constructor(pattern) {
         super();
-        setParent(pattern, this);
-
+        
         this.pattern = pattern;
     }
 
@@ -1291,8 +1433,7 @@ export class SpreadPattern extends Pattern {
 export class PropertyAlias extends Pattern {
     constructor(identifier, pattern) {
         super();
-        setParent([identifier, pattern], this);
-
+        
         this.identifier = identifier;
         this.pattern = pattern;
     }
@@ -1309,8 +1450,7 @@ export class PropertyAlias extends Pattern {
 export class ArrayPattern extends Pattern {
     constructor(patterns) {
         super();
-        setParent(patterns, this);
-
+        
         this.patterns = patterns;
     }
 
@@ -1382,8 +1522,7 @@ export class ArrayPattern extends Pattern {
 export class ObjectPattern extends Pattern {
     constructor(patterns) {
         super();
-        setParent(patterns, this);
-
+        
         this.patterns = patterns;
     }
 
@@ -1435,8 +1574,7 @@ export class ObjectPattern extends Pattern {
 export class DefaultPattern extends Pattern {
     constructor(pattern, expression) {
         super();
-        setParent([pattern, expression], this);
-
+        
         this.pattern = pattern;
         this.expression = expression;
     }
@@ -1458,7 +1596,7 @@ export class DefaultPattern extends Pattern {
 
 export class Super extends Statement {
     _toJS(o) {
-        return new js.Super();
+        return new js.Super().from(this);
     }
 }
 
@@ -1466,8 +1604,7 @@ export class ClassExpression extends Expression {
 	constructor(identifier = null, superClass = null, body = []) {
 		super();
 		
-		setParent([identifier, superClass, body], this);
-		
+				
 		this.identifier = identifier;
 		this.superClass = superClass;
 		this.body = body;
@@ -1510,9 +1647,10 @@ export class ClassExpression extends Expression {
 	    
 	    if (props.length === 0 && statprops.length === 0) {
 	        if (defined(this.identifier)) {
-	            return getJSAssign(this.identifier.name, cls, 'const');
+	            return getJSAssign(this.identifier.name, cls, 'const')
+                    .from(this);
 	        } else {
-	            return cls;
+	            return cls.from(this);
 	        }
 	    } else {
 	        let rapper = getJSMethodCall([LIB, 'classify'], [
@@ -1527,9 +1665,10 @@ export class ClassExpression extends Expression {
 	        }
 	        
 	        if (defined(this.identifier)) {
-	            return getJSAssign(this.identifier.name, rapper, 'const');
+	            return getJSAssign(this.identifier.name, rapper, 'const')
+                    .from(this);
 	        } else {
-	            return rapper;
+	            return rapper.from(this);
 	        }
 	    }
 	}
@@ -1547,8 +1686,7 @@ export class MethodDefinition extends Node {
 	constructor(key, value, kind = "method", isStatic = false, computed = false) {
 		super();
 		
-		setParent([key, value], this);
-		
+				
 		this.key = key;
 		this.value = value;
 		this.kind = kind;
@@ -1563,15 +1701,14 @@ export class MethodDefinition extends Node {
 	        this.kind,
 	        this.computed,
 	        this.static
-	        );
+	        ).from(this);
 	}
 }
 
 export class ClassProperty extends Node {
     constructor(key, value, computed = false) {
         super();
-        setParent([key, value], this);
-        
+                
         this.key = key;
         this.value = value;
         this.computed = computed;
@@ -1582,7 +1719,7 @@ export class ClassProperty extends Node {
             this.key.toJS(o),
             this.value.toJS(o),
             this.computed
-            );
+            ).from(this);
     }
 }
 
@@ -1590,24 +1727,23 @@ export class ClassProperty extends Node {
 export class FunctionDeclaration extends Declaration {
     constructor(identifier, func) {
         super();
-        setParent([identifier, func], this);
-        
+                
         this.identifier = identifier;
         this.func = func;
     }
     
-    _toJS(o) {        
+    _toJS(o) {
         if (this.parent instanceof Property)
             return new js.Property(
                 this.identifier,
                 this.func.toJS(o)
-                );
+                ).from(this);
         else
             return getJSDeclare(
                 this.identifier,
                 this.func.toJS(o), 
                 'const'
-                );
+                ).from(this);
     }
     
     * extractVariables() {
@@ -1621,8 +1757,7 @@ export class FunctionDeclaration extends Declaration {
 export class FunctionExpression extends Expression {
     constructor(params, body, bound = false, modifier = '') {
         super();
-        setParent([params, body], this);
-
+        
         this.params = params;
         this.body = body;
         this.bound = bound;
@@ -1660,9 +1795,9 @@ export class FunctionExpression extends Expression {
             return new js.CallExpression(
                 new js.MemberExpression(fn, new js.Identifier('bind')),
                 [new js.ThisExpression()]
-                );
+                ).from(this);
         } else {
-            return fn;
+            return fn.from(this);
         }
     }
 
@@ -1857,8 +1992,7 @@ export class FunctionExpression extends Expression {
 export class SequenceExpression extends Expression {
     constructor(expressions) {
         super();
-        setParent(expressions, this);
-
+        
         this.expressions = expressions;
     }
 }
@@ -1866,8 +2000,7 @@ export class SequenceExpression extends Expression {
 export class UnaryExpression extends Expression {
     constructor(operator, argument, prefix = true) {
         super();
-        setParent(argument, this);
-    
+            
         this.operator = operator;
         this.argument = argument;
         this.prefix = prefix;
@@ -1885,7 +2018,8 @@ export class UnaryExpression extends Expression {
             this.error('Invalid unary operator!');
         }
         
-        return new js.UnaryExpression(operator, this.prefix, this.argument.toJS(o));
+        return new js.UnaryExpression(operator, this.prefix, this.argument.toJS(o))
+            .from(this);
     }
 }
 
@@ -1907,8 +2041,7 @@ const smoothOperators = {
 export class BinaryExpression extends Expression {
     constructor(operator, left, right) {
         super();
-        setParent([left, right], this);
-
+        
         this.operator = operator;
         this.left = left;
         this.right = right;
@@ -1924,15 +2057,16 @@ export class BinaryExpression extends Expression {
                 convert[this.operator],
                 left,
                 right
-                );
+                ).from(this);
         }
 
         if ((this.operator + '=') in smoothOperators) {
             let fn = smoothOperators[this.operator + '='];
-            return fn(left, right);
+            return fn(left, right).from(this);
         }
         
-        return new js.BinaryExpression(this.operator, left, right);
+        return new js.BinaryExpression(this.operator, left, right)
+            .from(this);
     }
 }
 
@@ -1941,16 +2075,14 @@ export class BinaryExpression extends Expression {
 export class ComparativeExpression extends Expression {
     constructor(operator, left, right) {
         super();
-        setParent([left, right], this);
-        
+                
         this.operators = [operator];
         this.operands = [left, right];
     }
     
     // used by the parser to chain additional operators/operands to expression
     chain(operator, expression) {
-        setParent(expression, this);
-
+        
         this.operators.push(operator);
         this.operands.push(expression);
         return this;
@@ -2013,15 +2145,14 @@ export class ComparativeExpression extends Expression {
             ;
         }
         
-        return out;
+        return out.from(this);
     }
 }
 
 export class AssignmentExpression extends Expression {
     constructor(operator, left, right) {
         super();
-        setParent([left, right], this);
-
+        
         this.operator = assertAssignmentOperator(operator);
         this.left = left;
         this.right = right;
@@ -2036,13 +2167,14 @@ export class AssignmentExpression extends Expression {
                 let left = this.left.toJS(o);
                 let right = trans(left, this.right.toJS(o));
                
-                return new js.AssignmentExpression('=', left, right);
+                return new js.AssignmentExpression('=', left, right)
+                    .from(this);
             } else {
                 return new js.AssignmentExpression(
                     this.operator,
                     this.left.toJS(o),
                     this.right.toJS(o)
-                    );
+                    ).from(this);
             }
         } else if (this.left instanceof Pattern) {
             if (this.operator !== '=') {
@@ -2065,8 +2197,7 @@ export class AssignmentExpression extends Expression {
 export class UpdateExpression extends Expression {
     constructor(operator, argument, prefix) {
         super();
-        setParent(argument, this);
-
+        
         this.operator = assertUpdateOperator(operator);
         this.argument = argument;
         this.prefix = prefix;
@@ -2076,8 +2207,7 @@ export class UpdateExpression extends Expression {
 export class LogicalExpression extends Expression {
     constructor(operator, left, right) {
         super();
-        setParent([left, right], this);
-
+        
         this.operator = operator;
         this.left = left;
         this.right = right;
@@ -2088,7 +2218,7 @@ export class LogicalExpression extends Expression {
             this.operator,
             this.left.toJS(o),
             this.right.toJS(o)
-            );
+            ).from(this);
     }
 }
 
@@ -2096,8 +2226,7 @@ export class LogicalExpression extends Expression {
 export class CallExpression extends Expression {
     constructor(callee, args, isNew = false, doubtful = false) {
         super();
-        setParent([callee, args], this);
-
+        
         this.callee = callee;
         this.arguments = args;
         this.isNew = isNew;
@@ -2127,9 +2256,9 @@ export class CallExpression extends Expression {
             
             
             this.freeOpvars([opvar]);
-            return node;
+            return node.from(this);
         } else {
-            return new ctor(callee, args);            
+            return new ctor(callee, args).from(this);            
         }
     }
 }
@@ -2142,8 +2271,7 @@ export class MemberExpression extends Expression {
     // doubtful parameter is true if there there are question marks involved
     constructor(object, property, computed = false, doubtful = false) {
         super();
-        setParent([object, property], this);
-
+        
         this.object = object;
         this.property = property;
         this.computed = computed;
@@ -2154,7 +2282,8 @@ export class MemberExpression extends Expression {
         if (!this.doubtful) {
             let object = this.object.toJS(o);
             let right = this.property.toJS(o);
-            return new js.MemberExpression(object, right, this.computed);
+            return new js.MemberExpression(object, right, this.computed)
+                .from(this);
         } else {
             let [opvar] = this.getOpvars(1);
             let left    = getJSAssign(opvar, this.object.toJS(o));
@@ -2168,7 +2297,7 @@ export class MemberExpression extends Expression {
             
             
             this.freeOpvars([opvar]);
-            return node;
+            return node.from(this);
         }
     }
 }
@@ -2176,8 +2305,7 @@ export class MemberExpression extends Expression {
 export class DefinedExpression extends Expression {
     constructor(expression) {
         super();
-        setParent(expression, this);
-        
+                
         this.expression = expression;
     }
     
@@ -2186,15 +2314,14 @@ export class DefinedExpression extends Expression {
             '!==',
             this.expression.toJS(o),
             new js.Identifier('undefined')
-            );
+            ).from(this);
     }
 }
 
 export class SwitchCase extends Node {
     constructor(test, consequent) {
         super();
-        setParent([test, consequent], this);
-
+        
         this.test = test;
         this.consequent = consequent;
     }
@@ -2204,8 +2331,7 @@ export class SwitchCase extends Node {
 export class CatchClause extends Node {
     constructor(param, body) {
         super();
-        setParent([param, body], this);
-
+        
         this.param = param;
         this.body = body;
     }
@@ -2215,7 +2341,7 @@ export class CatchClause extends Node {
             return new js.CatchClause(
                 this.param.toJS(o),
                 this.body.toJS(o)
-                );
+                ).from(this);
         } else if (this.param instanceof Pattern) {
             // same usual trickery to support error destructuring in catch clause
             let placeholder     = nuVar('patternPlaceholder');
@@ -2224,7 +2350,8 @@ export class CatchClause extends Node {
             let block           = this.body.toJS(o);
             
             block.body.unshift(declarations);
-            return new js.CatchClause(holderVar, block);
+            return new js.CatchClause(holderVar, block)
+                .from(this);
         }
         
         this.param.error('Unrecognized parameter type!');
@@ -2240,7 +2367,8 @@ export class Identifier extends Expression {
     }
 
     _toJS(o) {
-        return new js.Identifier(this.name);
+        return new js.Identifier(this.name)
+            .from(this);
     }
 }
 
@@ -2295,8 +2423,7 @@ export class TemplateString extends Expression {
                     const node = ctrl.tree.body[0];
                     if (node instanceof ExpressionStatement) {
                         const expr = node.expression;
-                        setParent(expr, this);
-                        this.parts.push(expr);
+                                                this.parts.push(expr);
                     } else {
                         this.parts.push(null);
                     }
@@ -2312,7 +2439,8 @@ export class TemplateString extends Expression {
     _toJS(o) {
         const ctor = this.constructor;
         if (this.parts.length === 1) {              // if there is no interpolation
-            return new js.Literal(ctor.removeEscapes(this.parts[0]));
+            return new js.Literal(ctor.removeEscapes(this.parts[0]))
+                .from(this);
         } else if (this.parts.length > 2) {             // if interpolation exists in string
             let add = new js.BinaryExpression(
                 '+',
@@ -2345,7 +2473,7 @@ export class TemplateString extends Expression {
                 }
             }
             
-            return add;
+            return add.from(this);
         } else {
             this.error('Internal compiler error!');
         }
@@ -2359,7 +2487,8 @@ export class StringLiteral extends Literal {
     }
 
     _toJS(o) {
-        return new js.Literal(this.value);
+        return new js.Literal(this.value)
+            .from(this);
     }
 }
 
@@ -2369,15 +2498,15 @@ export class NumberLiteral extends Literal {
     }
 
     _toJS(o) {
-        return new js.Literal(+this.value);
+        return new js.Literal(+this.value)
+            .from(this);
     }
 }
 
 export class ModuleSpecifier extends Statement {
     constructor(local) {
         super();
-        setParent(local, this);
-        this.local = local;
+                this.local = local;
     }
 }
 
@@ -2390,8 +2519,7 @@ export class ModuleDeclaration extends Statement {
 export class ImportSpecifier extends ModuleSpecifier {
     constructor(imported, local = null) {
         super(local || imported);
-        setParent(imported, this);
-
+        
         this.imported = imported;
     }
 }
@@ -2405,8 +2533,7 @@ export class ImportDefaultSpecifier extends ModuleSpecifier {
 export class ImportDeclaration extends ModuleDeclaration {
     constructor(specifiers, source) {
         super();
-        setParent(specifiers, this);
-
+        
         this.specifiers = specifiers;
         this.path = source;
     }
@@ -2416,7 +2543,7 @@ export class ImportDeclaration extends ModuleDeclaration {
             this.require(),
             getJSMemberExpression([LIB, 'symbols', 'default']),
             true
-            );
+            ).from(this);
     }
 
     // generate require code for 
@@ -2482,7 +2609,7 @@ export class ImportDeclaration extends ModuleDeclaration {
         return new js.VariableDeclaration(
             declarators,
             'const'
-            );
+            ).from(this);
     }
 }
 
@@ -2493,8 +2620,7 @@ class ExportDeclaration extends ModuleDeclaration {
 export class ExportSpecifier extends ModuleSpecifier {
     constructor(local, exported = null) {
         super(local);
-        setParent(local, this);
-
+        
         this.exported = exported || local;
     }
 }
@@ -2502,8 +2628,7 @@ export class ExportSpecifier extends ModuleSpecifier {
 export class ExportNamedDeclaration extends ExportDeclaration {
     constructor(declaration, specifiers, source = null) {
         super();
-        setParent([declaration, specifiers], this);
-
+        
         this.declaration = declaration;
         this.specifiers = specifiers;
         this.path = source;
@@ -2523,28 +2648,25 @@ export class ExportNamedDeclaration extends ExportDeclaration {
                                 ),
                             new js.Identifier(specifier.local.name)
                             )
-                        )
+                        ).from(this)
                     );
             }
         } else {
             const declaration = this.declaration;
             if (declaration instanceof VariableDeclaration) {
                 lines.push(declaration.toJS(o));
-                for (var declarator of declaration.declarators) {
-                    if (declarator.id instanceof Pattern)
-                        throw new Error('Pattern exports not yet implemented!');
-
+                for (var name of declaration.extractVariables()) {
                     lines.push(
                         new js.ExpressionStatement(
                             new js.AssignmentExpression(
                                 '=',
                                 getJSMemberExpression(
-                                    [gvar, declarator.id.name]
+                                    [gvar, name]
                                     ),
-                                new js.Identifier(declarator.id.name)
+                                new js.Identifier(name)
                                 )
-                            )
-                        );
+                            ).from(this)
+                        );                    
                 }
             } else {
                 let name = declaration.identifier.name;
@@ -2570,7 +2692,7 @@ export class ExportNamedDeclaration extends ExportDeclaration {
                             getJSMemberExpression([gvar, name]),
                             new js.Identifier(name)
                             )
-                        )
+                        ).from(this)
                     );
             }
         }
@@ -2583,8 +2705,7 @@ export class ExportNamedDeclaration extends ExportDeclaration {
 export class ExportDefaultDeclaration extends ExportDeclaration {
     constructor(declaration) {
         super();
-        setParent(declaration, this);
-
+        
         this.declaration = declaration;
     }
 
@@ -2606,7 +2727,7 @@ export class ExportDefaultDeclaration extends ExportDeclaration {
                         ),
                     line.declaration
                     )
-                );
+                ).from(this);
         } else {
             const name = this.declaration.identifier.name;
             if (this.declaration instanceof FunctionDeclaration) {
@@ -2635,7 +2756,7 @@ export class ExportDefaultDeclaration extends ExportDeclaration {
                             ),
                         new js.Identifier(name)
                         ),
-                    );
+                    ).from(this);
             } else {
                 return [
                     this.declaration.toJS(o),
@@ -2653,7 +2774,7 @@ export class ExportDefaultDeclaration extends ExportDeclaration {
                                 true
                             ),
                             new js.Identifier(name)
-                        )
+                        ).from(this)
                 ]
             }
         }

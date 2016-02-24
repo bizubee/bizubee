@@ -11,6 +11,46 @@ test('For-in through iterable array', (api) -> {
 	api.done()
 })
 
+test('For-in with break statement', (api) -> {
+	var a = [2, 3, 4], b = []
+	for item in a {
+		b.push(item * 2)
+		if item == 3 do
+			break
+	}
+
+	api.arrayEq(b, [4, 6])
+	api.done()
+})
+
+test('For-in with nested break', (api) -> {
+	var a = [2, 3, 4], b = []
+	for item in a do
+		for i in [0, 1, 2, 3, 4] do
+			if i == 4 do
+				break 1
+			b.push(i)
+	
+
+	api.arrayEq(b, [0, 1, 2, 3])
+	api.done()
+})
+
+test('For-in with nested continue', (api) -> {
+	var a = [2, 3, 4], b = []
+	for item in a do
+		var c = 2 * item
+		for i in [0, 1, 2, 3, 4] do
+			c += i
+			if i == 3 do
+				b.push(c)
+				continue 1
+	
+
+	api.arrayEq(b, [10, 12, 14])
+	api.done()
+})
+
 test('For-in with iterable destructuring', (api) -> {
 	var a = [[2, 4], [3, 5], [4, 2]], arr = []
 	for [a, b] in a {

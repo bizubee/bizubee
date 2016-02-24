@@ -120,9 +120,19 @@ Statement:
 |   FunctionDeclaration
 |   ClassDeclaration
 |   VariableDeclaration
-|   'BREAK'                                 { $$ = new yy.BreakStatement().pos(@$)}
-|   'CONTINUE'                              { $$ = new yy.ContinueStatement().pos(@$)}
+|   BreakStatement                                 
+|   ContinueStatement     
 |   Expression              %prec SHIFTER   { $$ = new yy.ExpressionStatement($1).pos(@$)}
+;
+
+BreakStatement:
+    'BREAK'             { $$ = new yy.BreakStatement().pos(@$)}
+|   'BREAK' 'INT'       { $$ = new yy.BreakStatement($2.value).pos(@$)}
+;
+
+ContinueStatement:
+    'CONTINUE'          { $$ = new yy.ContinueStatement().pos(@$)}
+|   'CONTINUE' 'INT'    { $$ = new yy.ContinueStatement($2.value).pos(@$)}
 ;
 
 ReturnStatement:
@@ -259,10 +269,10 @@ VariableDeclaration:
         $$ = new yy.VariableDeclaration([new yy.VariableDeclarator($2, null).pos(@2)], true).pos(@$);
     }
 |   VariableDeclaration ',' Assignable 'ASSIGN' Expression {
-        $$ = $1.addAndReturn($3, $5).pos(@3, @5);
+        $$ = $1.add(new yy.VariableDeclarator($3, $5).pos(@3, @5)).pos(@$);
     }
 |   VariableDeclaration ',' Identifier {
-        $$ = $1.addAndReturn($3, null).pos(@$);
+        $$ = $1.add(new yy.VariableDeclarator($3, null).pos(@3)).pos(@$);
     }
 ;
 
@@ -413,13 +423,13 @@ ClassBody:
 ;
 
 ClassExpression:
-    ClassExpressionHeader '{' ClassBody '}'         { $$ = new yy.ClassExpression($1[0], $1[1], $3)}
-|   ClassExpressionHeader '{' '}'                   { $$ = new yy.ClassExpression($1[0], $1[1], [])}
+    ClassExpressionHeader '{' ClassBody '}'         { $$ = new yy.ClassExpression($1[0], $1[1], $3).pos(@$)}
+|   ClassExpressionHeader '{' '}'                   { $$ = new yy.ClassExpression($1[0], $1[1], []).pos(@$)}
 ;
 
 ClassDeclaration:
-    ClassDeclarationHeader '{' ClassBody '}'         { $$ = new yy.ClassExpression($1[0], $1[1], $3)}
-|   ClassDeclarationHeader '{' '}'                   { $$ = new yy.ClassExpression($1[0], $1[1], [])}
+    ClassDeclarationHeader '{' ClassBody '}'         { $$ = new yy.ClassExpression($1[0], $1[1], $3).pos(@$)}
+|   ClassDeclarationHeader '{' '}'                   { $$ = new yy.ClassExpression($1[0], $1[1], []).pos(@$)}
 ;
 
 

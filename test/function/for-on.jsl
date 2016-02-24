@@ -26,11 +26,13 @@ var observableFromArray = (arr) -> {
 	return observable
 }
 
+
 test('For-on basic support', (api) -> ~ {
 	var arr = [], values = [0, 1, 2, 3]
 	for value on observableFromArray(values) do {
 		arr.push(value * 2)
 	}
+
 	api.arrayEq(arr, [0, 2, 4, 6])
 	api.done()
 })
@@ -46,11 +48,13 @@ test('For-on with iterable destructuring', (api) -> ~ {
 })
 
 test('For-on with object destructuring', (api) -> ~ {
-	var a = [
-		{a1: 2, a2: 9}
-		{a1: 4, a2: 6}
-		{a1: 2, a2: 1}
-	], arr = []
+	var
+	,	a = [
+			{a1: 2, a2: 9}
+			{a1: 4, a2: 6}
+			{a1: 2, a2: 1}
+		]
+	,	arr = []
 
 	for {a1, a2} on observableFromArray(a) {
 		arr.push(a1 * a2)

@@ -6,13 +6,7 @@ Object.defineProperty(exports, "__esModule", {
 
 var _slicedToArray = (function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; })();
 
-exports.getJSConditional = getJSConditional;
-exports.getJSVar = getJSVar;
-exports.getJSAssign = getJSAssign;
-exports.getJSDeclare = getJSDeclare;
-exports.getJSMethodCall = getJSMethodCall;
-exports.getJSMemberExpression = getJSMemberExpression;
-exports.getJSIterable = getJSIterable;
+var path = require('path');
 
 var binaryOperator = new Set(["==", "!=", "===", "!==", "<", "<=", ">", ">=", "<<", ">>", ">>>", "+", "-", "*", "/", "%", "|", "^", "&", "in", "instanceof"]);
 
@@ -54,160 +48,9 @@ function assertUpdateOperator(operator) {
 	}
 }
 
-// returns
-
-function getJSConditional(_x22, _x23) {
-	var _again = true;
-
-	_function: while (_again) {
-		var identifier = _x22,
-		    def = _x23;
-		_again = false;
-
-		if (identifier instanceof Identifier) {
-			return new ConditionalExpression(new BinaryExpression('===', identifier, new Identifier('undefined')), def, identifier);
-		} else if (typeof identifier === 'string') {
-			_x22 = new Identifier(identifier);
-			_x23 = def;
-			_again = true;
-			continue _function;
-		} else {
-			throw new Error('Conditional expression must use identifier!');
-		}
-	}
-}
-
-function getJSVar(name) {
-	var constant = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
-	var init = arguments.length <= 2 || arguments[2] === undefined ? null : arguments[2];
-
-	return new VariableDeclaration([new AssignmentExpression('=', new Identifier(name), init.toJS({}))], constant ? 'const' : 'let');
-}
-
-function getJSAssign(name, value, type) {
-	var id = new Identifier(name);
-	var assign = new AssignmentExpression('=', id, value);
-	if (defined(type)) {
-		return new VariableDeclaration([new VariableDeclarator(id, value)], type);
-	} else {
-		return new AssignmentExpression('=', new Identifier(name), value);
-	}
-}
-
-function getJSDeclare(pattern, jvalue) {
-	var type = arguments.length <= 2 || arguments[2] === undefined ? 'const' : arguments[2];
-
-	if (pattern instanceof Identifier || pattern instanceof Identifier) {
-		return new VariableDeclaration([new VariableDeclarator(pattern.toJS({}), jvalue)], type);
-	}
-
-	if (pattern instanceof String) {
-		return new VariableDeclaration([new VariableDeclarator(new Identifier(pattern), jvalue)], type);
-	}
-
-	if (pattern instanceof ArrayPattern) {
-		var arr = [];
-		var _iteratorNormalCompletion = true;
-		var _didIteratorError = false;
-		var _iteratorError = undefined;
-
-		try {
-			for (var _iterator = pattern.extractAssigns(jvalue)[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-				var sp = _step.value;
-
-				arr.push(sp);
-			}
-		} catch (err) {
-			_didIteratorError = true;
-			_iteratorError = err;
-		} finally {
-			try {
-				if (!_iteratorNormalCompletion && _iterator["return"]) {
-					_iterator["return"]();
-				}
-			} finally {
-				if (_didIteratorError) {
-					throw _iteratorError;
-				}
-			}
-		}
-
-		return new VariableDeclaration(arr, type);
-	}
-
-	if (pattern instanceof ObjectPattern) {
-		var source = undefined,
-		    arr = undefined;
-		if (jvalue instanceof Identifier) {
-			arr = [];
-			source = jvalue;
-		} else {
-			var rvar = nuVar('patternPlaceholder');
-			var idf = new Identifier(rvar);
-			arr = [new VariableDeclarator(idf, jvalue)];
-			source = new Identifier(rvar);
-		}
-
-		var _iteratorNormalCompletion2 = true;
-		var _didIteratorError2 = false;
-		var _iteratorError2 = undefined;
-
-		try {
-			for (var _iterator2 = pattern.extractAssigns(source)[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-				var sp = _step2.value;
-
-				arr.push(sp);
-			}
-		} catch (err) {
-			_didIteratorError2 = true;
-			_iteratorError2 = err;
-		} finally {
-			try {
-				if (!_iteratorNormalCompletion2 && _iterator2["return"]) {
-					_iterator2["return"]();
-				}
-			} finally {
-				if (_didIteratorError2) {
-					throw _iteratorError2;
-				}
-			}
-		}
-
-		return new VariableDeclaration(arr, type);
-	}
-
-	if (pattern instanceof Identifier) {
-		return new VariableDeclaration([new VariableDeclarator(pattern, jvalue)], type);
-	}
-
-	pattern.error('Invalid declaration type!');
-}
-
-function getJSMethodCall(names, args) {
-	return new CallExpression(getJSMemberExpression(names), args);
-}
-
-function getJSMemberExpression(names) {
-	if (names.length === 0) {
-		throw new Error('Must have at least one man!');
-	} else {
-		var lead = new Identifier(names[0]);
-		for (var i = 1; i < names.length; i++) {
-			lead = new MemberExpression(lead, new Identifier(names[i]));
-		}
-
-		return lead;
-	}
-}
-
-function getJSIterable(target) {
-	return new CallExpression(new MemberExpression(target, getJSMemberExpression(['Symbol', 'iterator']), true), []);
-}
-
 class Node {
 	constructor() {
 		this.type = this.constructor.name;
-		this._origin = null;
 		this.loc = null;
 	}
 
@@ -216,6 +59,16 @@ class Node {
 	}
 
 	from(origin) {
+		var rootfile = origin.type === 'Program' ? origin.parameters.rootfile : origin.program.parameters.rootfile;
+		var relpath;
+
+		if (rootfile === origin.filename) {
+			relpath = path.basename(rootfile);
+		} else {
+			var dir = path.dirname(rootfile);
+			relpath = path.relative(dir, origin.filename);
+		}
+
 		var _origin$position = _slicedToArray(origin.position, 4);
 
 		var left = _origin$position[0];
@@ -224,17 +77,16 @@ class Node {
 		var down = _origin$position[3];
 
 		this.loc = {
-			source: origin.filename,
+			source: relpath,
 			start: {
 				column: left,
-				line: up
+				line: up + 1
 			},
 			end: {
 				column: right,
-				line: down
+				line: down + 1
 			}
 		};
-		this._origin = origin;
 
 		return this;
 	}
@@ -309,6 +161,16 @@ class ContinueStatement extends Statement {
 }
 
 exports.ContinueStatement = ContinueStatement;
+
+class LabeledStatement extends Statement {
+	constructor(label, body) {
+		super();
+		this.label = label;
+		this.body = body;
+	}
+}
+
+exports.LabeledStatement = LabeledStatement;
 
 class SwitchStatement extends Statement {
 	constructor(discriminant, cases) {
@@ -637,6 +499,15 @@ class SpreadElement extends Node {
 }
 
 exports.SpreadElement = SpreadElement;
+
+class RestElement extends Pattern {
+	constructor(pattern) {
+		super();
+		this.argument = pattern;
+	}
+}
+
+exports.RestElement = RestElement;
 
 class SwitchCase extends Node {
 	constructor(test, consequent) {

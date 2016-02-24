@@ -1,7 +1,8 @@
 "use strict";
 
 var fs 			= require('fs');
-var vm			= require("vm");
+var vm			= require('vm');
+var path		= require('path');
 var escodegen	= require('escodegen');
 var esvalid		= require('esvalid');
 var parser 		= require('./generated-parser');
@@ -12,6 +13,7 @@ var nodes 		= require('./bz-nodes');
 function control(tokens, parameters) {
 	let psr = getParser();
 	let tree = null;
+	let jstree = null;
 	return {
 		get tree() {
 			if (tree === null) {
@@ -22,11 +24,22 @@ function control(tokens, parameters) {
 			return tree;
 		},
 		getJSTree(o) {
-			return this.tree.toJS(o || {});
+			return (jstree || (jstree = this.tree.toJS(o || {})));
 		},
 		getJSText(o) {
-			const parsed = this.tree.toJS(o || {});
+			const parsed = this.getJSTree(o);
 			return escodegen.generate(parsed);
+		},
+		getMap(targetFile) {
+			const parsed = this.getJSTree();
+			const dir = path.relative(
+				path.dirname(targetFile),
+				path.dirname(tree.parameters.rootfile)
+				);
+			return escodegen.generate(parsed, {
+				sourceMap: true,
+				sourceMapRoot: dir
+			});
 		},
 		get api() {
 			return this.tree.api;
