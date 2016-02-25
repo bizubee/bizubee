@@ -4,7 +4,6 @@ var fs 			= require('fs');
 var vm			= require('vm');
 var path		= require('path');
 var escodegen	= require('escodegen');
-var esvalid		= require('esvalid');
 var parser 		= require('./generated-parser');
 var lexer 		= require('./lexer');
 var errors		= require('./errors');
