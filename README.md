@@ -1,6 +1,6 @@
 # Bizubee 
 
-The philosophy behind Bizubee is to have a language that preserves JavaScript semantics, while simultaneously simplifying and extending JS. Bizubee syntax is very much inspired by CoffeeScript, though the semantics differ significanty.  Unlike CoffeeScript, the Bizubee compiler targets modern JavaScript (currently ES2015), since transpilers like Traceur can further transpile for support in legacy browsers.
+Bizubee aims to preserve JavaScript semantics while simultaneously simplifying and extending JS. Bizubee syntax is largely inspired by CoffeeScript and Dart, though the semantics differ significanty from both.  Unlike most compile-to-js languages, the Bizubee compiler targets modern JavaScript (currently ES2015), since transpilers like Traceur can further transpile for support in legacy browsers.
 
 Additions and deviations from JS:
 
@@ -390,10 +390,10 @@ Note that "./someFile" is imported multiple times, but the file is evaluated onl
 
 ```
 
-	$ bizubee -c bizubee/file/path.jsl 		# to compile file
-	$ bizubee bizubee/file/path.jsl                 # to execute file
-	$ bizubee bizubee/file/path.jsl <arguments>     # to execute file with arguments
-	$ bizubee <options> bizubee/file/path.jsl <arguments>    # to add runtime args
+	$ bizubee -c bizubee/file/path.bz 				# to compile file
+	$ bizubee bizubee/file/path.bz                 	# to execute file
+	$ bizubee bizubee/file/path.bz <arguments>     	# to execute file with arguments
+	$ bizubee <options> bizubee/file/path.bz <arguments>    # to add runtime args
 ```
 
 

@@ -12,7 +12,7 @@ const BUILTINS = new Set([
 	'collections'
 ]);
 
-module.exports.extension = 'jsl';
+module.exports.extension = 'bz';
 
 module.exports.extensions = new Set([
 	'.',

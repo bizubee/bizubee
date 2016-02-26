@@ -180,7 +180,7 @@ co(function*(){
 co(function*() {
 	for (let testFile of testFiles) {
 		let relativePath = `test/function/${testFile}`;
-		if (!testFile.endsWith('.jsl')) {
+		if (!testFile.endsWith('.bz')) {
 			continue;
 		}
 

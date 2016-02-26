@@ -390,7 +390,7 @@ function Cursor(csrc) {
 function keywordType(token) {
 	if (token.tag === token.value.toUpperCase()) {
 		if (JSL_KW.has(token.value))
-			return 'jsl';
+			return 'bz';
 		if (JS_KW.has(token.value))
 			return 'js';
 	}
