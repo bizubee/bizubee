@@ -5,8 +5,8 @@ function reflect() {
 	return this;
 }
 
-export function enumerate(iterator) {
-	var i = 0;
+export function enumerate(iterable) {
+	var i = 0, iterator = iterable[Symbol.iterator]();
 	return {
 		[Symbol.iterator]: reflect,
 		next() {
@@ -16,15 +16,17 @@ export function enumerate(iterator) {
 			} else {
 				return {
 					done: false,
-					value: tuple(i++, ctrl.value)
+					value: [i++, ctrl.value]
 				};
 			}
 		}
 	}
 }
 
-export function cat(...iterators) {
-	const length = iterators.length;
+export function cat(...iterables) {
+	const length = iterables.length;
+	const iterators =
+		iterables.map(iterable => iterable[Symbol.iterator]());
 	return {
 		[Symbol.iterator]: reflect,
 		next(val) {
@@ -68,6 +70,24 @@ export function zip(...iterables) {
 			return {
 				done: false,
 				value: values
+			}
+		}
+	}
+}
+
+export function keyvals(object) {
+	const keygen = keys(object);
+	return {
+		[Symbol.iterator]: reflect,
+		next() {
+			const ctrl = keygen.next();
+			if (ctrl.done) {
+				return ctrl;
+			} else {
+				return {
+					done: false,
+					value: [ctrl.value, object[ctrl.value]]
+				};
 			}
 		}
 	}

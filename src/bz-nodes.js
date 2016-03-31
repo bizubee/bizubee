@@ -68,7 +68,7 @@ var assignmentOperator = new Set(["=", "+=", "-=", "*=", "/=", "//=", "%=", "^="
 
 var updateOperator = new Set(["++", "--"]);
 
-var unaryOperators = new Set(['+', '-', '!']);
+var unaryOperators = new Set(['+', '-', 'delete', '!']);
 
 var convert = {
     // cuz JS's '==' operator is total sh**

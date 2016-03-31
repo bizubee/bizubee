@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const escodegen = require('escodegen');
-const esvalid = require("esvalid");
 const vargen = require('./vargen');
 const js = require('./js-nodes');
 const jsg = require('./js-gen');

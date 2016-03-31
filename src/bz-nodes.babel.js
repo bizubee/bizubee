@@ -83,6 +83,7 @@ const updateOperator = new Set([
 const unaryOperators = new Set([
     '+',
     '-',
+    'delete',
     '!'
 ]);
 

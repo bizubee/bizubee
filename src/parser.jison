@@ -38,7 +38,7 @@
 %right UMIN UPLUS
 %left '^'
 %left 'AWAIT' 'YIELD_FROM'
-%right 'TYPEOF'
+%right 'TYPEOF' 'DELETE'
 %nonassoc 'IS'
 %right 'UB_FUNC' 'B_FUNC'
 
@@ -485,6 +485,7 @@ UnaryExpression:
 |   '+' Expression      %prec UPLUS     { $$ = new yy.UnaryExpression('+', $2).pos(@$)}
 |   '!' Expression                      { $$ = new yy.UnaryExpression('!', $2).pos(@$)}
 |   'NOT' Expression                    { $$ = new yy.UnaryExpression('!', $2).pos(@$)}
+|   'DELETE' Expression                 { $$ = new yy.UnaryExpression('delete', $2).pos(@$)}
 |   Expression '?'                      { $$ = new yy.DefinedExpression($1).pos(@$)}
 ;
 

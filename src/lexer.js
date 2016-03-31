@@ -167,7 +167,10 @@ function endlnFilterFactory(before, after) {
 }
 
 
-
+filters.push(endlnFilterFactory(
+	new Set(['END_COMMENT']),
+	new Set()
+	));
 
 filters.push(function* (gen) {
 	gen = pgen(gen);
