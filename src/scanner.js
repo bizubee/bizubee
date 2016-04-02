@@ -272,7 +272,7 @@ const total = [
 		tag: 'SPLAT'
 	},
 	{
-		pattern: 'yield*',
+		pattern: /yield\s*\*/,
 		tag: 'YIELD_FROM'
 	},
 	{pattern: '!'},
@@ -298,7 +298,11 @@ const total = [
 	{pattern: '--'},
 	{pattern: '++'},
 	{pattern: '|<', tag: 'RETURN_LEFT'},
-	{pattern: '>|', tag: 'RETURN_RIGHT'}
+	{pattern: '>|', tag: 'RETURN_RIGHT'},
+	{pattern: '<<', tag: 'YIELD_LEFT'},
+	{pattern: '>>', tag: 'YIELD_RIGHT'},
+	{pattern: /<<\s*\*/, tag: 'YF_LEFT'},
+	{pattern: /\*\s*>>/, tag: 'YF_RIGHT'}
 ];
 
 

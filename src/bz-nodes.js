@@ -3304,7 +3304,7 @@ class ValueExpression extends Expression {
         var body = this.statement.toJS(o);
         var block = body instanceof Array ? new js.BlockStatement(body) : new js.BlockStatement([body]);
 
-        if (parentFunc.modifier === '') {
+        if (parentFunc === null || parentFunc.modifier === '') {
             return new js.CallExpression(new js.FunctionExpression(null, [], block), []);
         } else {
             return new js.YieldExpression(new js.CallExpression(new js.FunctionExpression(null, [], block, true), []), true);

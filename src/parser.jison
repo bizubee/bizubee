@@ -28,6 +28,8 @@
 %nonassoc ','
 
 %right 'ASSIGN'
+%left 'YIELD_LEFT'
+%right 'YIELD_RIGHT'
 %left 'YIELD'
 %right 'NOT'
 %left 'OR' 'AND'
@@ -40,6 +42,8 @@
 %right UMIN UPLUS
 %left '^'
 %left 'AWAIT' 'YIELD_FROM'
+%left 'YF_LEFT'
+%right 'YF_RIGHT'
 %right 'TYPEOF' 'DELETE'
 %nonassoc 'IS'
 %right 'UB_FUNC' 'B_FUNC'
@@ -154,7 +158,11 @@ ThrowStatement:
 Continuation:
     'YIELD'                                         { $$ = new yy.YieldExpression(null).pos(@$)}
 |   'YIELD' Expression                              { $$ = new yy.YieldExpression($2).pos(@$)}
+|   'YIELD_LEFT' Expression                         { $$ = new yy.YieldExpression($2).pos(@$)}
+|   Expression 'YIELD_RIGHT'                        { $$ = new yy.YieldExpression($1).pos(@$)}
 |   'YIELD_FROM' Expression                         { $$ = new yy.YieldExpression($2, true).pos(@$)}
+|   'YF_LEFT' Expression                            { $$ = new yy.YieldExpression($2, true).pos(@$)}
+|   Expression 'YF_RIGHT'                           { $$ = new yy.YieldExpression($1, true).pos(@$)}
 |   'AWAIT'                                         { $$ = new yy.AwaitExpression(null).pos(@$)}
 |   'AWAIT' Expression                              { $$ = new yy.AwaitExpression($2).pos(@$)}
 ;

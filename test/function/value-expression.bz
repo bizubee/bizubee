@@ -38,3 +38,27 @@ test("Coerce Block-statement", (api) -> {
 	api.eq(a, 32)
 	api.done()
 })
+
+test("Coerce While-statement", (api) -> {
+	var i = 0
+	const a = $ while true do
+		i += 2
+		if i > 9
+			|< i
+
+	api.eq(a, 10)
+	api.done()
+})
+
+test("Coerce For-statement", (api) -> {
+	var arr = [2, 55, 20, 62], i = 0
+	const a = $ for val in arr do
+		if val ^ 2 > 3600 do
+			i >|
+		else
+			i += 1
+
+
+	api.eq(a, 3)
+	api.done()
+})

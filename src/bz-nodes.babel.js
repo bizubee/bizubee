@@ -2771,7 +2771,7 @@ export class ValueExpression extends Expression {
             new js.BlockStatement(body) :
             new js.BlockStatement([body]);
 
-        if (parentFunc.modifier === '') {
+        if (parentFunc === null || parentFunc.modifier === '') {
             return new js.CallExpression(
                 new js.FunctionExpression(
                     null,
