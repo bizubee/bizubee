@@ -2397,7 +2397,8 @@ class FunctionExpression extends Expression {
 
         var body = this.body.toJS(o);
         if (!(body instanceof js.BlockStatement)) {
-            body = new js.BlockStatement([body]);
+            var instructions = [new js.ReturnStatement(body)];
+            body = new js.BlockStatement(instructions);
         }
 
         var i = 0;

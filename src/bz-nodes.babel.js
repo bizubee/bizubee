@@ -1882,7 +1882,10 @@ export class FunctionExpression extends Expression {
     regularToJs(o, noparams = false) {
         let body = this.body.toJS(o);
         if (!(body instanceof js.BlockStatement)) {
-            body = new js.BlockStatement([body]);
+            const instructions = [
+                new js.ReturnStatement(body)
+            ];
+            body = new js.BlockStatement(instructions);
         }
 
         let i = 0;

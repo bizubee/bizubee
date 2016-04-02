@@ -137,15 +137,16 @@ test('Return-left shorthand syntax', (api) -> {
 test('Return-right shorthand syntax', (api) -> {
 	a(val) -> {
 		5 * 5 - 4 >|
+		3 * 3 + 4 >|
 	}
 	
 	api.eq(a(5), 21)
 	api.done()
 })
 
-test('One-line functions with shorthand returns', (api) -> {
-	square(val) -> val * val >|
-	cube(val) -> |< val * val * val
+test('One-line functions', (api) -> {
+	square(val) -> val ^ 2
+	cube(val) -> val ^ 3
 
 	api.eq(square(5), 25)
 	api.eq(cube(5), 125)

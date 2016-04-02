@@ -5,6 +5,8 @@
 %nonassoc 'THEN'
 %nonassoc 'EXPORT'
 
+%right 'UB_FUNC' 'B_FUNC'
+
 %nonassoc SHIFTER
 %right '$'
 %nonassoc 'IF'
@@ -46,7 +48,6 @@
 %right 'YF_RIGHT'
 %right 'TYPEOF' 'DELETE'
 %nonassoc 'IS'
-%right 'UB_FUNC' 'B_FUNC'
 
 %right 'Q_ACCESS'
 %right 'ACCESS'
@@ -385,10 +386,16 @@ Parameters:
 ;
 
 FunctionExpression:
-    Parameters 'B_FUNC' Statement {
+    Parameters 'B_FUNC' BlockStatement {
         $$ = new yy.FunctionExpression($1, $3, true).pos(@$)
     }
-|   Parameters 'UB_FUNC' Statement {
+|   Parameters 'B_FUNC' Expression {
+        $$ = new yy.FunctionExpression($1, $3, true).pos(@$)
+    }
+|   Parameters 'UB_FUNC' BlockStatement {
+        $$ = new yy.FunctionExpression($1, $3, false).pos(@$)
+    }
+|   Parameters 'UB_FUNC' Expression {
         $$ = new yy.FunctionExpression($1, $3, false).pos(@$)
     }
 |   Parameters 'B_FUNC' FunctionModifier BlockStatement {
