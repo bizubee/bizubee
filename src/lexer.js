@@ -947,7 +947,61 @@ filters.push(function* (gen) {
 			yield token;
 		}
 	});
+}
 
+{
+	// downgrade keyword "$" to name if it precedes following block 
+	// statement types
+	const postval = new Set([
+		'IF',
+		'FOR',
+		'WHILE',
+		'TRY',
+		'DO'
+	]);
+
+	filters.push(function*(gen) {
+		gen = pgen(gen);
+		var prev = null;
+
+		for (let token of gen) {
+			if (token.tag === 'EOF') {
+				yield token;
+				return;
+			}
+
+			if (token.tag === 'ENDLN') {
+				if (prev === '$') {
+					const next = gen.peek();
+					if (postval.has(next.value.tag)) {
+						prev = token.tag;
+						continue;
+					}
+				}
+			}
+			yield token;
+			
+			prev = token.tag;
+		}
+	})
+
+	filters.push(function*(gen) {
+		gen = pgen(gen);
+		for (let token of gen) {
+			if (token.tag === 'EOF') {
+				yield token;
+				return;
+			}
+
+			if (token.tag === '$') {
+				const next = gen.peek();
+				if (!postval.has(next.value.tag)) {
+					token.tag = 'NAME';					
+				}
+			}
+			yield token;
+		}
+	});
 }
 
 exports.parseCharSrc = function(csrc) {

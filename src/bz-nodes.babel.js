@@ -1881,6 +1881,10 @@ export class FunctionExpression extends Expression {
 
     regularToJs(o, noparams = false) {
         let body = this.body.toJS(o);
+        if (!(body instanceof js.BlockStatement)) {
+            body = new js.BlockStatement([body]);
+        }
+
         let i = 0;
         
 
@@ -2750,6 +2754,45 @@ export class ExportDefaultDeclaration extends ExportDeclaration {
                         ).from(this)
                 ]
             }
+        }
+    }
+}
+
+export class ValueExpression extends Expression {
+    constructor(statement) {
+        super();
+        this.statement = statement;
+    }
+
+    _toJS(o) {
+        const parentFunc = this.getParentFunction();
+        const body = this.statement.toJS(o);
+        var block = (body instanceof Array)?
+            new js.BlockStatement(body) :
+            new js.BlockStatement([body]);
+
+        if (parentFunc.modifier === '') {
+            return new js.CallExpression(
+                new js.FunctionExpression(
+                    null,
+                    [],
+                    block
+                    ),
+                []
+                );
+        } else {
+            return new js.YieldExpression(
+                new js.CallExpression(
+                    new js.FunctionExpression(
+                        null,
+                        [],
+                        block,
+                        true
+                        ),
+                    []
+                    ),
+                true
+                );
         }
     }
 }

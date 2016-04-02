@@ -123,3 +123,31 @@ test('Empty function', (api) -> {
 	api.eq(a(), undefined)
 	api.done()
 })
+
+test('Return-left shorthand syntax', (api) -> {
+	a(val) -> {
+		|< 5 * 5 + 3
+	}
+	
+	api.eq(a(5), 28)
+	api.done()
+})
+
+
+test('Return-right shorthand syntax', (api) -> {
+	a(val) -> {
+		5 * 5 - 4 >|
+	}
+	
+	api.eq(a(5), 21)
+	api.done()
+})
+
+test('One-line functions with shorthand returns', (api) -> {
+	square(val) -> val * val >|
+	cube(val) -> |< val * val * val
+
+	api.eq(square(5), 25)
+	api.eq(cube(5), 125)
+	api.done()
+})

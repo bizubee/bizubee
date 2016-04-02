@@ -2396,6 +2396,10 @@ class FunctionExpression extends Expression {
         var noparams = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
 
         var body = this.body.toJS(o);
+        if (!(body instanceof js.BlockStatement)) {
+            body = new js.BlockStatement([body]);
+        }
+
         var i = 0;
 
         if (noparams) {
@@ -3288,3 +3292,24 @@ class ExportDefaultDeclaration extends ExportDeclaration {
 }
 
 exports.ExportDefaultDeclaration = ExportDefaultDeclaration;
+
+class ValueExpression extends Expression {
+    constructor(statement) {
+        super();
+        this.statement = statement;
+    }
+
+    _toJS(o) {
+        var parentFunc = this.getParentFunction();
+        var body = this.statement.toJS(o);
+        var block = body instanceof Array ? new js.BlockStatement(body) : new js.BlockStatement([body]);
+
+        if (parentFunc.modifier === '') {
+            return new js.CallExpression(new js.FunctionExpression(null, [], block), []);
+        } else {
+            return new js.YieldExpression(new js.CallExpression(new js.FunctionExpression(null, [], block, true), []), true);
+        }
+    }
+}
+
+exports.ValueExpression = ValueExpression;

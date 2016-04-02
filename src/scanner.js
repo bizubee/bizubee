@@ -1,3 +1,4 @@
+
 "use strict";
 
 // javascript keywords
@@ -50,7 +51,8 @@ const JSL_KW = new Set([
 	"as",
 	"and",
 	"or",
-	"then"
+	"then",
+	"$"
 ]);
 
 // patterns to match for a beginning or complete token
@@ -294,7 +296,9 @@ const total = [
 	{pattern: "<", tag: 'COMPARE'},
 	{pattern: "@"},
 	{pattern: '--'},
-	{pattern: '++'}
+	{pattern: '++'},
+	{pattern: '|<', tag: 'RETURN_LEFT'},
+	{pattern: '>|', tag: 'RETURN_RIGHT'}
 ];
 
 

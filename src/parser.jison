@@ -1,10 +1,12 @@
 
 %nonassoc 'RETURN'
+%nonassoc 'RETURN_LEFT'
+%nonassoc 'RETURN_RIGHT'
 %nonassoc 'THEN'
 %nonassoc 'EXPORT'
 
 %nonassoc SHIFTER
-
+%right '$'
 %nonassoc 'IF'
 %nonassoc 'ELSE'
 
@@ -57,6 +59,7 @@
 
 %nonassoc '(' ')'
 %nonassoc '{' '}'
+%nonassoc 'RETURN_RIGHT'
 
 %%
 
@@ -97,6 +100,7 @@ Expression:
 |   Continuation
 |	WrappedExpression   %prec SUBCALL
 |   ClassExpression
+|   ValueExpression
 ;
 
 Pattern:
@@ -138,6 +142,8 @@ ContinueStatement:
 ReturnStatement:
     'RETURN'                                                        { $$ = new yy.ReturnStatement(null).pos(@$)}
 |	'RETURN' Expression                                             { $$ = new yy.ReturnStatement($2).pos(@$)}
+|   'RETURN_LEFT' Expression                                        { $$ = new yy.ReturnStatement($2).pos(@$)}
+|   Expression 'RETURN_RIGHT'                                       { $$ = new yy.ReturnStatement($1).pos(@$)}
 |	'RETURN' Expression 'THEN' Statement                            { $$ = new yy.ReturnStatement($2, $4).pos(@$)}
 ;
 
@@ -371,10 +377,10 @@ Parameters:
 ;
 
 FunctionExpression:
-    Parameters 'B_FUNC' BlockStatement {
+    Parameters 'B_FUNC' Statement {
         $$ = new yy.FunctionExpression($1, $3, true).pos(@$)
     }
-|   Parameters 'UB_FUNC' BlockStatement {
+|   Parameters 'UB_FUNC' Statement {
         $$ = new yy.FunctionExpression($1, $3, false).pos(@$)
     }
 |   Parameters 'B_FUNC' FunctionModifier BlockStatement {
@@ -607,6 +613,10 @@ ExportDefaultDeclaration:
         { $$ = new yy.ExportDefaultDeclaration($3).pos(@$)}
 ;
 
+
+ValueExpression:
+    '$' BlockableStatement  { $$ = new yy.ValueExpression($2).pos(@$)}
+;
 
 
 
