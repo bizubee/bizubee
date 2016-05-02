@@ -52,6 +52,8 @@ const JSL_KW = new Set([
 	"and",
 	"or",
 	"then",
+	"get",
+	"set",
 	"$"
 ]);
 
@@ -65,11 +67,27 @@ const total = [
 		test: function(value, trail){
 			if (trail.length < 2) 	return false;
 			if (value === '\n') 	return false;
-
+			let end = trail.length;
 			let i = 1, pattern = ['FROM', 'WHITESPACE'];
 			while (true) {
 				let poffset = pattern.length - i, toffset = trail.length - i;
 				if (poffset < 0) {
+
+					// if 'from' is preceeded by '.' ignore it
+					if (end >= 4) {
+						if (trail[end - 3] === 'WHITESPACE' || trail[end - 3] === 'ENDLN') {
+							return trail[end - 4] !== 'ACCESS';
+						} else {
+							return trail[end - 3] !== 'ACCESS';
+						}
+					}
+
+					// ignore 'from' if succeeded by ':'
+					// sorry paths can't start with ':' I guess
+					if (value[0] === ':') {
+						return false;
+					}
+
 					return true;
 				}
 

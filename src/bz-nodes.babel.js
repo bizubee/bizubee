@@ -1,7 +1,8 @@
 
 import * as js from './js-nodes';
 import escodegen from 'escodegen';
-import pathlib from 'path'
+//import {isValid, errors} from 'esvalid';
+import pathlib from 'path';
 import fs from 'fs';
 import path from 'path';
 import {Lines, Line} from './errors';
@@ -136,6 +137,11 @@ Array.prototype.prepend = function(elems) {
     } else {
         this.unshift(elems);
     }
+}
+
+// string to js Identifier node
+function strtoid(name) {
+    return new js.Identifier(name);
 }
 
 function defined(val) {
@@ -372,8 +378,11 @@ export class Node {
         let loc = this[POSITION_KEY];
         let x = loc.first_column, y = loc.first_line;
         let lines = new Lines(this.source, 4);
-
-        lines.error(text, [x, y]);
+        if (!!this.program.parameters.throwSyntax) {
+            throw new Error('Parser error!');
+        } else {
+            lines.error(text, [x, y]);
+        }
     }
 
     get parent() {
@@ -661,7 +670,7 @@ export class Program extends Scope {
         }
 
         o.exportVar = globalVar('exports');
-        LIB = globalVar('bzbSupportLib');
+        LIB = globalVar('lib');
         
         
         instructions.push(getJSDeclare(
@@ -739,7 +748,7 @@ export class Program extends Scope {
     }
     
     runtimeCompile(o) {
-        LIB = nuVar('bzbSupportLib');
+        LIB = nuVar('lib');
         var instructions = statement([
             new js.Literal("use strict"),
             getJSAssign(LIB, getJSMethodCall(['require'], [new js.Literal(LIB_PATH)]), 'const'),
@@ -959,7 +968,7 @@ export class ReturnStatement extends Statement {
             if (this.after instanceof ReturnStatement)
                 this.after.error('Cannot return from function multiple times!');
             
-            let variableName    = nuVar('returnValue');
+            let variableName    = nuVar('out');
             let variable        = new js.Identifier(variableName);
             let lines           = [
                 getJSDeclare(variable, this.argument.toJS(o), 'const')
@@ -1056,19 +1065,16 @@ export class ForStatement extends Statement {
     }
 
     syncToJS(o) {
-        let left = nuVar('iterant');
-        let right = this.right.toJS(o);
-        let nuleft = new js.VariableDeclaration(
-            [new js.VariableDeclarator(new js.Identifier(left))],
+        let declaration = new js.VariableDeclaration(
+            [new js.VariableDeclarator(this.left.toJS(o))],
             'let'
-        );
+            );
 
-        let jbody = this.body.toJS(o);
-        let declare = getJSDeclare(this.left, new js.Identifier(left), 'const');
-
-        jbody.body.unshift(declare);
-
-        let loop = new js.ForOfStatement(jbody, nuleft, right)
+        let loop = new js.ForOfStatement(
+            this.body.toJS(o),
+            declaration,
+            this.right.toJS(o)
+            );
 
         if (this.label === null) {
             return loop.from(this);
@@ -1085,62 +1091,77 @@ export class ForStatement extends Statement {
         if (!pfunc.async)
             this.error('Cannot have for-on loop in sync function!');
 
-        let right = nuVar('lefthandPlaceholder');   // variable placeholder for async generator expression
-        let ctrl = nuVar('observerController');     // generator's {done(bool), value} variable
-        let ctrle = getJSAssign(
-            ctrl,
-            new js.YieldExpression(getJSMethodCall([right, 'next'], [])),
-            'const'
+        let right = nuVar('agen');   // variable placeholder for async generator expression
+        let ctrl = nuVar('stat');    // generator's {done(bool), value} variable
+        
+        // async gen expression, e.g.: asyncIterable[lib.symbols.observer]()
+        let asyncGen = new js.CallExpression(
+            new js.MemberExpression(
+                this.right.toJS(),
+                getJSMemberExpression([LIB, 'symbols', 'observer']),
+                true
+                ),
+            []
             );
 
-        let cond = new js.IfStatement(
-            getJSMemberExpression([ctrl, 'done']),
-            new js.BreakStatement())
 
-        let decl = getJSDeclare(this.left,
-            getJSMemberExpression([ctrl, 'value']));
+        // initialize vars holding async iterator and 
+        // async iterator controller ({done : true|false, value: ...})
+        let init = new js.VariableDeclaration(
+            [
+                new js.VariableDeclarator(strtoid(ctrl)),
+                new js.VariableDeclarator(strtoid(right), asyncGen),
+            ],
+            'let'
+            );
 
-        let body = [ctrle, cond].concat(decl);
+        // update iterator controller
+        let update = new js.AssignmentExpression(
+            '=',
+            strtoid(ctrl),
+            new js.YieldExpression(getJSMethodCall([right, 'next'], []))
+            );
+
+        // if !<ctrl var>.done keep iterating
+        let test = new js.UnaryExpression(
+            '!',
+            getJSMemberExpression([ctrl, 'done'])
+            );
+
+
+        // this is where the loop variable is assigned
+        let declare = new js.VariableDeclaration([
+            new js.VariableDeclarator(
+                this.left.toJS(o),
+                getJSMemberExpression([ctrl, 'value'])
+                )
+            ],
+            'let'
+            );
+
+        let body = [declare];
         for (let line of this.body) {
-            body.append(line.toJS(o));
+            body.push(line.toJS(o));
         }
 
 
-        let buff = [
-            getJSAssign(
-                right,
-                new js.CallExpression(
-                    new js.MemberExpression(
-                        this.right.toJS(),
-                        getJSMemberExpression([LIB, 'symbols', 'observer']),
-                        true
-                        ),
-                    []
-                    ),
-                'const'
-                ).from(this)
-        ];
+        var loop = new js.ForStatement(
+            new js.BlockStatement(body),
+            init,
+            new js.SequenceExpression([
+                update,
+                test
+            ])
+            );
 
         if (this.label === null) {
-            buff.push(
-                new js.WhileStatement(
-                    new js.Literal(true),
-                    new js.BlockStatement(body)
-                    ).from(this)
-                );
+            return loop.from(this);
         } else {
-            buff.push(
-                new js.LabeledStatement(
-                    new js.Identifier(this.label),
-                    new js.WhileStatement(
-                        new js.Literal(true),
-                        new js.BlockStatement(body)
-                        )
-                    ).from(this)
-                );
+            return new js.LabeledStatement(
+                new js.Identifier(this.label),
+                loop
+                ).from(this);
         }
-
-        return buff;
     }
 }
 
@@ -1219,22 +1240,7 @@ export class VariableDeclarator extends Node {
         // always return an array
         
         let init = (!!this.init) ? this.init.toJS(o) : null;
-        if (this.id instanceof Pattern) {
-            if (init === null)
-                this.id.error('All pattern declarations must be initialized!');
-
-            let nuvar = nuVar('patternPlaceholder');
-            let arr = [
-                new js.VariableDeclarator(new js.Identifier(nuvar), init)
-                    .from(this)
-            ];
-
-            for (let pattern of this.id.extractAssigns(new js.Identifier(nuvar))) {
-                arr.push(pattern);
-            }
-
-            return arr;
-        } else return new js.VariableDeclarator(this.id.toJS(o), init)
+        return new js.VariableDeclarator(this.id.toJS(o), init)
             .from(this);
     }
 }
@@ -1394,6 +1400,12 @@ export class SpreadPattern extends Pattern {
         this.pattern = pattern;
     }
 
+    _toJS(o) {
+        return new js.RestElement(
+            this.pattern.toJS(o)
+            ).from(this);
+    }
+
     * extractVariables() {
         if (this.pattern instanceof Identifier) {
             yield this.pattern.name;
@@ -1411,6 +1423,13 @@ export class PropertyAlias extends Pattern {
         this.pattern = pattern;
     }
 
+    _toJS(o) {
+        return new js.AssignmentProperty(
+            this.identifier.toJS(o),
+            this.pattern.toJS(o)
+            ).from(this);
+    }
+
     * extractVariables() {
         if (this.pattern instanceof Identifier) {
             yield this.pattern.name;
@@ -1425,6 +1444,15 @@ export class ArrayPattern extends Pattern {
         super();
         
         this.patterns = patterns;
+    }
+
+    _toJS(o) {
+        const jsPatterns = [];
+        for (var pattern of this.patterns) {
+            jsPatterns.push(pattern.toJS(o));
+        }
+
+        return new js.ArrayPattern(jsPatterns).from(this);
     }
 
     hasSplat() {
@@ -1493,10 +1521,26 @@ export class ArrayPattern extends Pattern {
 }
 
 export class ObjectPattern extends Pattern {
-    constructor(patterns) {
+    constructor(properties) {
         super();
         
-        this.patterns = patterns;
+        this.properties = properties;
+    }
+
+    _toJS(o) {
+        const jsProperties = [];
+        for (var property of this.properties) {
+            if (property instanceof Identifier) {
+                const id = property.toJS(o);
+                jsProperties.push(
+                    new js.AssignmentProperty(id, id)
+                    );
+            } else {
+                jsProperties.push(property.toJS(o));
+            }
+        }
+
+        return new js.ObjectPattern(jsProperties).from(this);
     }
 
     * extractVariables() {
@@ -1550,6 +1594,13 @@ export class DefaultPattern extends Pattern {
         
         this.pattern = pattern;
         this.expression = expression;
+    }
+
+    _toJS(o) {
+        return new js.AssignmentPattern(
+            this.pattern.toJS(o),
+            this.expression.toJS(o)
+            ).from(this);
     }
 
     * extractAssigns(jsVal, declare = true) {
@@ -1819,66 +1870,6 @@ export class FunctionExpression extends Expression {
         yield* this.walkBody();
     }
 
-    // processes parameters of the function, and take care of patterns in the body
-    processParams(o) {
-        let i = 0, body = [], params = [];
-
-        for (let pram of this.params) {
-            let param, def = null;
-            if (pram instanceof DefaultPattern) {
-                param = pram.pattern;
-                def = pram.expression;
-            } else {
-                param = pram;
-            }
-            
-            if (param instanceof Identifier) {
-                params.push(param.toJS(o));
-                if (def !== null) {
-                    body.push(
-                        getJSAssign(
-                            param.name,
-                            getJSConditional(param.name, def.toJS(o))
-                            )
-                        );
-                }
-                i++;
-                continue;
-            }
-
-            if (param instanceof ArrayPattern || param instanceof ObjectPattern) {
-                let ph = nuVar('patternPlaceholder');
-                params.push(new js.Identifier(ph));
-                if (def !== null) {
-                    body.push(
-                        getJSAssign(
-                            ph,
-                            getJSConditional(ph, def.toJS(o))
-                            )
-                        );
-                }
-                body.push(getJSDeclare(param, new js.Identifier(ph), 'const'));
-
-                i++;
-                continue;
-            }
-
-            if (param instanceof SpreadPattern) {
-                body.push(getJSDeclare(param.pattern, getJSMethodCall(
-                    [LIB, 'restargs'],
-                    [new js.Identifier('arguments'), new js.Literal(i)]),
-                    'const'
-                ));
-
-                break;
-            }
-
-            param.error('This should not be here!');
-        }
-
-        return {params, prebody: body};
-    }
-
     regularToJs(o, noparams = false) {
         let body = this.body.toJS(o);
         if (!(body instanceof js.BlockStatement)) {
@@ -1891,16 +1882,11 @@ export class FunctionExpression extends Expression {
         let i = 0;
         
 
-        if (noparams) {
-            var [params, prebody] = [[], []];
-        } else {
-            var {params, prebody} = this.processParams(o);
-        }
-
-        body.body.prepend(statement(prebody));
         return new js.FunctionExpression(
             null,
-            params,
+            noparams ? [] : this.params.map(
+                param => param.toJS(o)
+                ),
             body,
             null);
     }
@@ -1916,7 +1902,7 @@ export class FunctionExpression extends Expression {
     }
 
     asyncGeneratorToJs(o, noparams = false) {
-        let ctrlVar = this._ctrl = nuVar('observableController');
+        let ctrlVar = this._ctrl = nuVar('ctrl');
 
         let ctrl = getJSAssign(
             ctrlVar, 
@@ -1938,7 +1924,6 @@ export class FunctionExpression extends Expression {
             'observable'
         ]));
 
-        let {params, prebody} = this.processParams(o);
         let block = new js.BlockStatement([ctrl, mem, ret].map(el => {
             if (el instanceof js.Expression) {
                 return new js.ExpressionStatement(el);
@@ -1947,16 +1932,10 @@ export class FunctionExpression extends Expression {
             }
         }));
 
-        if (noparams) {
-            params = [];
-            prebody = [];
-        }
-
-        block.body.prepend(prebody);
 
         return new js.FunctionExpression(
             null,
-            params,
+            noparams ? [] : this.params.map(p => p.toJS(o)),
             block);
     }
 
@@ -1998,8 +1977,11 @@ export class UnaryExpression extends Expression {
             this.error('Invalid unary operator!');
         }
         
-        return new js.UnaryExpression(operator, this.prefix, this.argument.toJS(o))
-            .from(this);
+        return new js.UnaryExpression(
+            operator,
+            this.argument.toJS(o),
+            this.prefix
+            ).from(this);
     }
 }
 
@@ -2139,37 +2121,20 @@ export class AssignmentExpression extends Expression {
     }
 
     _toJS(o) {
-        if (this.left instanceof Identifier ||
-            this.left instanceof MemberExpression) {
-            let rightHandSide;
-            if (this.operator in smoothOperators) {
-                let trans = smoothOperators[this.operator];
-                let left = this.left.toJS(o);
-                let right = trans(left, this.right.toJS(o));
-               
-                return new js.AssignmentExpression('=', left, right)
-                    .from(this);
-            } else {
-                return new js.AssignmentExpression(
-                    this.operator,
-                    this.left.toJS(o),
-                    this.right.toJS(o)
-                    ).from(this);
-            }
-        } else if (this.left instanceof Pattern) {
-            if (this.operator !== '=') {
-                this.left.error('Patterns not allowed with assignment type');
-            }
-            
-            let nvar = nuVar('patternPlaceholder'), arr = [new getJSAssign(nvar, this.right)];
-            for (let assign of this.left.extractAssigns(
-                new js.Identifier(nvar))) {
-                arr.push(assign);
-            }
-
-            return arr;
+        let rightHandSide;
+        if (this.operator in smoothOperators) {
+            let trans = smoothOperators[this.operator];
+            let left = this.left.toJS(o);
+            let right = trans(left, this.right.toJS(o));
+           
+            return new js.AssignmentExpression('=', left, right)
+                .from(this);
         } else {
-            this.left.error('Invalid assignable!');
+            return new js.AssignmentExpression(
+                this.operator,
+                this.left.toJS(o),
+                this.right.toJS(o)
+                ).from(this);
         }
     }
 }
@@ -2202,8 +2167,120 @@ export class LogicalExpression extends Expression {
     }
 }
 
+export class QuestionableExpression extends Expression {
 
-export class CallExpression extends Expression {
+    // compile some.weird?.property?.chain
+    getChain(stack, heads, o) {
+        throw new Error('Must implement getChain method!');
+    }
+
+    get subject() {
+        throw new Error('Must implement subject getter!');
+    }
+
+    // compile some.weird?.property?.chain
+    getChain(stack, heads, o) {
+        if (this.doubtful) {
+            const [op] = this.getOpvars(1);
+            const id = new js.Identifier(op);
+            const ref = this.getJSRef(id, o);
+            const fn = (node) => {
+                if (ref instanceof js.CallExpression) {
+                    ref.callee = node;
+                } else {
+                    ref.object = node;
+                }
+            };
+
+            if (this.subject instanceof QuestionableExpression) {
+                stack.push(
+                    this.subject.getChain(stack, heads, o)
+                    );
+            } else {
+                stack.push(
+                    this.subject.toJS(o)
+                    );
+            }
+
+            heads.push([
+                op,
+                fn,
+                this instanceof CallExpression
+            ]);
+            return ref;
+        } else {
+            const left = (this.subject instanceof QuestionableExpression) ?
+                this.subject.getChain(stack, heads, o) :
+                this.subject.toJS(o);
+
+            return this.getJSRef(left, o);
+        }
+    }
+
+
+    _toJS(o) {
+        const stack = [], heads = [];
+        const undie = new js.UnaryExpression(
+            'void',
+            new js.Literal(0)
+            );
+        stack.push(
+            this.getChain(stack, heads, o)
+            );
+
+        var pointer = stack[stack.length - 1];
+        for (var i = heads.length - 1; i >= 0; i--) {
+            const [name, changeNode, isCall] = heads[i];
+            const node = stack[i];
+            if (isCall) {
+                if (node instanceof js.MemberExpression && !node.computed) {
+                    const id = new js.Identifier(name), prop = node.property;
+                    changeNode(new js.MemberExpression(id, prop));
+                    pointer = new js.ConditionalExpression(
+                        new js.BinaryExpression(
+                            '!=',
+                            new js.MemberExpression(
+                                new js.AssignmentExpression(
+                                    '=',
+                                    id,
+                                    node.object
+                                    ),
+                                prop
+                                )
+                            ,
+                            new js.Literal(null)
+                            ),
+                        pointer,
+                        undie
+                        );
+                    continue;
+                }
+            }
+
+            pointer = new js.ConditionalExpression(
+                new js.BinaryExpression(
+                    '!=',
+                    new js.AssignmentExpression(
+                        '=',
+                        new js.Identifier(name),
+                        node
+                        ),
+                    new js.Literal(null)
+                    ),
+                pointer,
+                undie
+                );
+        }
+
+        return pointer.from(this);
+    }
+
+    getJSRef() {
+        throw new Error("QE extendees must implement getJSRef!");
+    }
+}
+
+export class CallExpression extends QuestionableExpression {
     constructor(callee, args, isNew = false, doubtful = false) {
         super();
         
@@ -2213,33 +2290,16 @@ export class CallExpression extends Expression {
         this.doubtful = doubtful;
     }
 
-    _toJS(o) {
-        var
-        args = [],
-        callee = this.callee.toJS(o),
-        ctor = this.isNew ? js.NewExpression : js.CallExpression;
-        
-        for (var argument of this.arguments) {
-            args.push(argument.toJS(o));
-        }
-        
-        if (this.doubtful) {
-            let [opvar] = this.getOpvars(1);
-            let left    = getJSAssign(opvar, callee);
-            let undie   = new js.Identifier('undefined');
-            
-            let node    = new js.ConditionalExpression(
-                new js.BinaryExpression('===', left, undie),
-                undie,
-                new ctor(left.left, args)
-                );
-            
-            
-            this.freeOpvars([opvar]);
-            return node.from(this);
-        } else {
-            return new ctor(callee, args).from(this);            
-        }
+    getJSRef(subject, o) {
+        const ctor = this.isNew ? js.NewExpression : js.CallExpression;
+        return new ctor(
+            subject,
+            this.arguments.map(arg => arg.toJS(o))
+            );
+    }
+
+    get subject() {
+        return this.callee;
     }
 }
 
@@ -2247,7 +2307,7 @@ export class NewExpression extends CallExpression {
 
 }
 
-export class MemberExpression extends Expression {
+export class MemberExpression extends QuestionableExpression {
     // doubtful parameter is true if there there are question marks involved
     constructor(object, property, computed = false, doubtful = false) {
         super();
@@ -2258,27 +2318,16 @@ export class MemberExpression extends Expression {
         this.doubtful = doubtful;
     }
 
-    _toJS(o) {
-        if (!this.doubtful) {
-            let object = this.object.toJS(o);
-            let right = this.property.toJS(o);
-            return new js.MemberExpression(object, right, this.computed)
-                .from(this);
-        } else {
-            let [opvar] = this.getOpvars(1);
-            let left    = getJSAssign(opvar, this.object.toJS(o));
-            let undie   = new js.Identifier('undefined');
-            
-            let node    = new js.ConditionalExpression(
-                new js.BinaryExpression('===', left, undie),
-                undie,
-                new js.MemberExpression(left.left, this.property.toJS(o), this.computed)
-                );
-            
-            
-            this.freeOpvars([opvar]);
-            return node.from(this);
-        }
+    getJSRef(subject, o) {
+        return new js.MemberExpression(
+            subject,
+            this.property.toJS(o),
+            this.computed
+            );
+    }
+
+    get subject() {
+        return this.object;
     }
 }
 
@@ -2291,9 +2340,9 @@ export class DefinedExpression extends Expression {
     
     _toJS(o) {
         return new js.BinaryExpression(
-            '!==',
+            '!=',
             this.expression.toJS(o),
-            new js.Identifier('undefined')
+            new js.Identifier('null')
             ).from(this);
     }
 }
@@ -2317,24 +2366,10 @@ export class CatchClause extends Node {
     }
     
     _toJS(o) {
-        if (this.param instanceof Identifier) {
-            return new js.CatchClause(
-                this.param.toJS(o),
-                this.body.toJS(o)
-                ).from(this);
-        } else if (this.param instanceof Pattern) {
-            // same usual trickery to support error destructuring in catch clause
-            let placeholder     = nuVar('patternPlaceholder');
-            let holderVar       = new js.Identifier(placeholder);
-            let declarations    = getJSDeclare(this.param, holderVar, 'const');
-            let block           = this.body.toJS(o);
-            
-            block.body.unshift(declarations);
-            return new js.CatchClause(holderVar, block)
-                .from(this);
-        }
-        
-        this.param.error('Unrecognized parameter type!');
+        return new js.CatchClause(
+            this.param.toJS(o),
+            this.body.toJS(o)
+            ).from(this);
     }
 }
 

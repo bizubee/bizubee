@@ -1004,6 +1004,28 @@ filters.push(function* (gen) {
 	});
 }
 
+{
+	// demote get, set keywords when not infront of name tokens
+	filters.push(function*(gen) {
+		gen = pgen(gen);
+
+		for (let token of gen) {
+			if (token.tag === 'EOF') {
+				yield token;
+				return;
+			}
+
+			if (token.tag === 'GET' || token.tag === 'SET') {
+				const next = gen.peek();
+				if (next.value.tag !== 'NAME') {
+					token.tag = 'NAME';
+				}
+			}
+			yield token;
+		}
+	});
+}
+
 exports.parseCharSrc = function(csrc) {
 	return exports.refineTokens(scanner.getTokensFromSource(csrc), csrc);
 }

@@ -1,4 +1,3 @@
-
 "use strict";
 
 const fs 	    = require('fs');
@@ -43,9 +42,7 @@ function utilWarn(name) {
 }
 
 const symbols = {};
-symbols.export = Symbol('Export Symbol');
-symbols.observer = Symbol('Observer Symbol');
-exports.symbols = symbols;
+exports.symbols = support.symbols;
 
 
 function createContext(filename, ctxt) {
@@ -118,6 +115,25 @@ function main() {
 	// default main function
 }
 
+function runStringInNewContext(bizubee, filepath, ctxt, mod) {
+    let abspath     = path.resolve(filepath);
+    let ctx         = createContext(abspath, ctxt);
+
+    let ctrl    	= parser.parseString(bizubee, {file: filepath});
+    let exportVar 	= vargen.nuVar('exports');
+    let js          = ctrl.getJSText({exportVar});
+    let jsPath		= `${abspath}.js`;
+    
+    if (mod) ctx[exportVar] = {};
+    else ctx[exportVar] = {[exportVar]: main};
+    vm.runInNewContext(js, ctx, jsPath);
+    return {
+    	context: ctx,
+    	exports: (mod) ? ctx[exportVar] : undefined,
+    	main: (!mod) ? ctx[exportVar][exportVar] || empty : undefined
+    }
+}
+
 function runFileInNewContext(filepath, ctxt, mod) {
 
     let abspath         = path.resolve(filepath);
@@ -156,6 +172,7 @@ function runFileInNewContext(filepath, ctxt, mod) {
     }
 }
 
+exports.runStringInNewContext = runStringInNewContext;
 exports.runFileInNewContext = runFileInNewContext;
 
 

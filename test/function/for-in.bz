@@ -53,8 +53,8 @@ test('For-in with nested continue', (api) -> {
 
 test('For-in with iterable destructuring', (api) -> {
 	var a = [[2, 4], [3, 5], [4, 2]], arr = []
-	for [a, b] in a {
-		arr.push(a * b)
+	for [b, c] in a {
+		arr.push(b * c)
 	}
 
 	api.arrayEq(arr, [8, 15, 8])

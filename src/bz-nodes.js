@@ -20,6 +20,8 @@ var _escodegen = require('escodegen');
 
 var _escodegen2 = _interopRequireDefault(_escodegen);
 
+//import {isValid, errors} from 'esvalid';
+
 var _path = require('path');
 
 var _path2 = _interopRequireDefault(_path);
@@ -122,6 +124,11 @@ Array.prototype.prepend = function (elems) {
         this.unshift(elems);
     }
 };
+
+// string to js Identifier node
+function strtoid(name) {
+    return new js.Identifier(name);
+}
 
 function defined(val) {
     return val !== undefined && val !== null;
@@ -383,8 +390,11 @@ class Node {
         var x = loc.first_column,
             y = loc.first_line;
         var lines = new _errors.Lines(this.source, 4);
-
-        lines.error(text, [x, y]);
+        if (!!this.program.parameters.throwSyntax) {
+            throw new Error('Parser error!');
+        } else {
+            lines.error(text, [x, y]);
+        }
     }
 
     get parent() {
@@ -856,7 +866,7 @@ class Program extends Scope {
         }
 
         o.exportVar = (0, _vargen.globalVar)('exports');
-        LIB = (0, _vargen.globalVar)('bzbSupportLib');
+        LIB = (0, _vargen.globalVar)('lib');
 
         instructions.push((0, _jsGen.getJSDeclare)(new js.Identifier(LIB), acorn.parseExpressionAt(_fs2['default'].readFileSync(__dirname + '/fragments/lib.js', 'utf8'), 0, { ecmaVersion: 6 }), 'const'));
 
@@ -957,7 +967,7 @@ class Program extends Scope {
     }
 
     runtimeCompile(o) {
-        LIB = (0, _vargen.nuVar)('bzbSupportLib');
+        LIB = (0, _vargen.nuVar)('lib');
         var instructions = statement([new js.Literal("use strict"), (0, _jsGen.getJSAssign)(LIB, (0, _jsGen.getJSMethodCall)(['require'], [new js.Literal(LIB_PATH)]), 'const'), EMPTY, EMPTY, EMPTY]) || o.instructions;
 
         var _iteratorNormalCompletion15 = true;
@@ -1206,7 +1216,7 @@ class ReturnStatement extends Statement {
         if (defined(this.after)) {
             if (this.after instanceof ReturnStatement) this.after.error('Cannot return from function multiple times!');
 
-            var variableName = (0, _vargen.nuVar)('returnValue');
+            var variableName = (0, _vargen.nuVar)('out');
             var variable = new js.Identifier(variableName);
             var lines = [(0, _jsGen.getJSDeclare)(variable, this.argument.toJS(o), 'const')];
 
@@ -1297,16 +1307,9 @@ class ForStatement extends Statement {
     }
 
     syncToJS(o) {
-        var left = (0, _vargen.nuVar)('iterant');
-        var right = this.right.toJS(o);
-        var nuleft = new js.VariableDeclaration([new js.VariableDeclarator(new js.Identifier(left))], 'let');
+        var declaration = new js.VariableDeclaration([new js.VariableDeclarator(this.left.toJS(o))], 'let');
 
-        var jbody = this.body.toJS(o);
-        var declare = (0, _jsGen.getJSDeclare)(this.left, new js.Identifier(left), 'const');
-
-        jbody.body.unshift(declare);
-
-        var loop = new js.ForOfStatement(jbody, nuleft, right);
+        var loop = new js.ForOfStatement(this.body.toJS(o), declaration, this.right.toJS(o));
 
         if (this.label === null) {
             return loop.from(this);
@@ -1319,15 +1322,26 @@ class ForStatement extends Statement {
         var pfunc = this.getParentFunction();
         if (!pfunc.async) this.error('Cannot have for-on loop in sync function!');
 
-        var right = (0, _vargen.nuVar)('lefthandPlaceholder'); // variable placeholder for async generator expression
-        var ctrl = (0, _vargen.nuVar)('observerController'); // generator's {done(bool), value} variable
-        var ctrle = (0, _jsGen.getJSAssign)(ctrl, new js.YieldExpression((0, _jsGen.getJSMethodCall)([right, 'next'], [])), 'const');
+        var right = (0, _vargen.nuVar)('agen'); // variable placeholder for async generator expression
+        var ctrl = (0, _vargen.nuVar)('stat'); // generator's {done(bool), value} variable
 
-        var cond = new js.IfStatement((0, _jsGen.getJSMemberExpression)([ctrl, 'done']), new js.BreakStatement());
+        // async gen expression, e.g.: asyncIterable[lib.symbols.observer]()
+        var asyncGen = new js.CallExpression(new js.MemberExpression(this.right.toJS(), (0, _jsGen.getJSMemberExpression)([LIB, 'symbols', 'observer']), true), []);
 
-        var decl = (0, _jsGen.getJSDeclare)(this.left, (0, _jsGen.getJSMemberExpression)([ctrl, 'value']));
+        // initialize vars holding async iterator and
+        // async iterator controller ({done : true|false, value: ...})
+        var init = new js.VariableDeclaration([new js.VariableDeclarator(strtoid(ctrl)), new js.VariableDeclarator(strtoid(right), asyncGen)], 'let');
 
-        var body = [ctrle, cond].concat(decl);
+        // update iterator controller
+        var update = new js.AssignmentExpression('=', strtoid(ctrl), new js.YieldExpression((0, _jsGen.getJSMethodCall)([right, 'next'], [])));
+
+        // if !<ctrl var>.done keep iterating
+        var test = new js.UnaryExpression('!', (0, _jsGen.getJSMemberExpression)([ctrl, 'done']));
+
+        // this is where the loop variable is assigned
+        var declare = new js.VariableDeclaration([new js.VariableDeclarator(this.left.toJS(o), (0, _jsGen.getJSMemberExpression)([ctrl, 'value']))], 'let');
+
+        var body = [declare];
         var _iteratorNormalCompletion17 = true;
         var _didIteratorError17 = false;
         var _iteratorError17 = undefined;
@@ -1336,7 +1350,7 @@ class ForStatement extends Statement {
             for (var _iterator17 = this.body[Symbol.iterator](), _step17; !(_iteratorNormalCompletion17 = (_step17 = _iterator17.next()).done); _iteratorNormalCompletion17 = true) {
                 var _line3 = _step17.value;
 
-                body.append(_line3.toJS(o));
+                body.push(_line3.toJS(o));
             }
         } catch (err) {
             _didIteratorError17 = true;
@@ -1353,15 +1367,13 @@ class ForStatement extends Statement {
             }
         }
 
-        var buff = [(0, _jsGen.getJSAssign)(right, new js.CallExpression(new js.MemberExpression(this.right.toJS(), (0, _jsGen.getJSMemberExpression)([LIB, 'symbols', 'observer']), true), []), 'const').from(this)];
+        var loop = new js.ForStatement(new js.BlockStatement(body), init, new js.SequenceExpression([update, test]));
 
         if (this.label === null) {
-            buff.push(new js.WhileStatement(new js.Literal(true), new js.BlockStatement(body)).from(this));
+            return loop.from(this);
         } else {
-            buff.push(new js.LabeledStatement(new js.Identifier(this.label), new js.WhileStatement(new js.Literal(true), new js.BlockStatement(body))).from(this));
+            return new js.LabeledStatement(new js.Identifier(this.label), loop).from(this);
         }
-
-        return buff;
     }
 }
 
@@ -1508,39 +1520,7 @@ class VariableDeclarator extends Node {
         // always return an array
 
         var init = !!this.init ? this.init.toJS(o) : null;
-        if (this.id instanceof Pattern) {
-            if (init === null) this.id.error('All pattern declarations must be initialized!');
-
-            var nuvar = (0, _vargen.nuVar)('patternPlaceholder');
-            var arr = [new js.VariableDeclarator(new js.Identifier(nuvar), init).from(this)];
-
-            var _iteratorNormalCompletion21 = true;
-            var _didIteratorError21 = false;
-            var _iteratorError21 = undefined;
-
-            try {
-                for (var _iterator21 = this.id.extractAssigns(new js.Identifier(nuvar))[Symbol.iterator](), _step21; !(_iteratorNormalCompletion21 = (_step21 = _iterator21.next()).done); _iteratorNormalCompletion21 = true) {
-                    var pattern = _step21.value;
-
-                    arr.push(pattern);
-                }
-            } catch (err) {
-                _didIteratorError21 = true;
-                _iteratorError21 = err;
-            } finally {
-                try {
-                    if (!_iteratorNormalCompletion21 && _iterator21['return']) {
-                        _iterator21['return']();
-                    }
-                } finally {
-                    if (_didIteratorError21) {
-                        throw _iteratorError21;
-                    }
-                }
-            }
-
-            return arr;
-        } else return new js.VariableDeclarator(this.id.toJS(o), init).from(this);
+        return new js.VariableDeclarator(this.id.toJS(o), init).from(this);
     }
 }
 
@@ -1624,27 +1604,27 @@ class ArrayExpression extends Expression {
 
     _toJS(o) {
         var array = [];
-        var _iteratorNormalCompletion22 = true;
-        var _didIteratorError22 = false;
-        var _iteratorError22 = undefined;
+        var _iteratorNormalCompletion21 = true;
+        var _didIteratorError21 = false;
+        var _iteratorError21 = undefined;
 
         try {
-            for (var _iterator22 = this.elements[Symbol.iterator](), _step22; !(_iteratorNormalCompletion22 = (_step22 = _iterator22.next()).done); _iteratorNormalCompletion22 = true) {
-                var element = _step22.value;
+            for (var _iterator21 = this.elements[Symbol.iterator](), _step21; !(_iteratorNormalCompletion21 = (_step21 = _iterator21.next()).done); _iteratorNormalCompletion21 = true) {
+                var element = _step21.value;
 
                 array.push(element.toJS(o));
             }
         } catch (err) {
-            _didIteratorError22 = true;
-            _iteratorError22 = err;
+            _didIteratorError21 = true;
+            _iteratorError21 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion22 && _iterator22['return']) {
-                    _iterator22['return']();
+                if (!_iteratorNormalCompletion21 && _iterator21['return']) {
+                    _iterator21['return']();
                 }
             } finally {
-                if (_didIteratorError22) {
-                    throw _iteratorError22;
+                if (_didIteratorError21) {
+                    throw _iteratorError21;
                 }
             }
         }
@@ -1664,27 +1644,27 @@ class ObjectExpression extends Expression {
 
     _toJS(o) {
         var props = [];
-        var _iteratorNormalCompletion23 = true;
-        var _didIteratorError23 = false;
-        var _iteratorError23 = undefined;
+        var _iteratorNormalCompletion22 = true;
+        var _didIteratorError22 = false;
+        var _iteratorError22 = undefined;
 
         try {
-            for (var _iterator23 = this.properties[Symbol.iterator](), _step23; !(_iteratorNormalCompletion23 = (_step23 = _iterator23.next()).done); _iteratorNormalCompletion23 = true) {
-                var prop = _step23.value;
+            for (var _iterator22 = this.properties[Symbol.iterator](), _step22; !(_iteratorNormalCompletion22 = (_step22 = _iterator22.next()).done); _iteratorNormalCompletion22 = true) {
+                var prop = _step22.value;
 
                 props.push(prop.toJS(o));
             }
         } catch (err) {
-            _didIteratorError23 = true;
-            _iteratorError23 = err;
+            _didIteratorError22 = true;
+            _iteratorError22 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion23 && _iterator23['return']) {
-                    _iterator23['return']();
+                if (!_iteratorNormalCompletion22 && _iterator22['return']) {
+                    _iterator22['return']();
                 }
             } finally {
-                if (_didIteratorError23) {
-                    throw _iteratorError23;
+                if (_didIteratorError22) {
+                    throw _iteratorError22;
                 }
             }
         }
@@ -1750,6 +1730,10 @@ class SpreadPattern extends Pattern {
         this.pattern = pattern;
     }
 
+    _toJS(o) {
+        return new js.RestElement(this.pattern.toJS(o)).from(this);
+    }
+
     *extractVariables() {
         if (this.pattern instanceof Identifier) {
             yield this.pattern.name;
@@ -1769,6 +1753,10 @@ class PropertyAlias extends Pattern {
         this.pattern = pattern;
     }
 
+    _toJS(o) {
+        return new js.AssignmentProperty(this.identifier.toJS(o), this.pattern.toJS(o)).from(this);
+    }
+
     *extractVariables() {
         if (this.pattern instanceof Identifier) {
             yield this.pattern.name;
@@ -1785,6 +1773,36 @@ class ArrayPattern extends Pattern {
         super();
 
         this.patterns = patterns;
+    }
+
+    _toJS(o) {
+        var jsPatterns = [];
+        var _iteratorNormalCompletion23 = true;
+        var _didIteratorError23 = false;
+        var _iteratorError23 = undefined;
+
+        try {
+            for (var _iterator23 = this.patterns[Symbol.iterator](), _step23; !(_iteratorNormalCompletion23 = (_step23 = _iterator23.next()).done); _iteratorNormalCompletion23 = true) {
+                var pattern = _step23.value;
+
+                jsPatterns.push(pattern.toJS(o));
+            }
+        } catch (err) {
+            _didIteratorError23 = true;
+            _iteratorError23 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion23 && _iterator23['return']) {
+                    _iterator23['return']();
+                }
+            } finally {
+                if (_didIteratorError23) {
+                    throw _iteratorError23;
+                }
+            }
+        }
+
+        return new js.ArrayPattern(jsPatterns).from(this);
     }
 
     hasSplat() {
@@ -1917,26 +1935,28 @@ class ArrayPattern extends Pattern {
 exports.ArrayPattern = ArrayPattern;
 
 class ObjectPattern extends Pattern {
-    constructor(patterns) {
+    constructor(properties) {
         super();
 
-        this.patterns = patterns;
+        this.properties = properties;
     }
 
-    *extractVariables() {
+    _toJS(o) {
+        var jsProperties = [];
         var _iteratorNormalCompletion27 = true;
         var _didIteratorError27 = false;
         var _iteratorError27 = undefined;
 
         try {
-            for (var _iterator27 = this.patterns[Symbol.iterator](), _step27; !(_iteratorNormalCompletion27 = (_step27 = _iterator27.next()).done); _iteratorNormalCompletion27 = true) {
-                var pattern = _step27.value;
+            for (var _iterator27 = this.properties[Symbol.iterator](), _step27; !(_iteratorNormalCompletion27 = (_step27 = _iterator27.next()).done); _iteratorNormalCompletion27 = true) {
+                var property = _step27.value;
 
-                if (pattern instanceof Identifier) {
-                    yield pattern.name;
-                } else if (pattern instanceof Pattern) {
-                    yield* pattern.extractVariables();
-                } else pattern.error('Token not allowed in ObjectPattern');
+                if (property instanceof Identifier) {
+                    var id = property.toJS(o);
+                    jsProperties.push(new js.AssignmentProperty(id, id));
+                } else {
+                    jsProperties.push(property.toJS(o));
+                }
             }
         } catch (err) {
             _didIteratorError27 = true;
@@ -1952,11 +1972,11 @@ class ObjectPattern extends Pattern {
                 }
             }
         }
+
+        return new js.ObjectPattern(jsProperties).from(this);
     }
 
-    *extractAssigns(target) {
-        var declare = arguments.length <= 1 || arguments[1] === undefined ? true : arguments[1];
-        var def = arguments.length <= 2 || arguments[2] === undefined ? null : arguments[2];
+    *extractVariables() {
         var _iteratorNormalCompletion28 = true;
         var _didIteratorError28 = false;
         var _iteratorError28 = undefined;
@@ -1964,6 +1984,39 @@ class ObjectPattern extends Pattern {
         try {
             for (var _iterator28 = this.patterns[Symbol.iterator](), _step28; !(_iteratorNormalCompletion28 = (_step28 = _iterator28.next()).done); _iteratorNormalCompletion28 = true) {
                 var pattern = _step28.value;
+
+                if (pattern instanceof Identifier) {
+                    yield pattern.name;
+                } else if (pattern instanceof Pattern) {
+                    yield* pattern.extractVariables();
+                } else pattern.error('Token not allowed in ObjectPattern');
+            }
+        } catch (err) {
+            _didIteratorError28 = true;
+            _iteratorError28 = err;
+        } finally {
+            try {
+                if (!_iteratorNormalCompletion28 && _iterator28['return']) {
+                    _iterator28['return']();
+                }
+            } finally {
+                if (_didIteratorError28) {
+                    throw _iteratorError28;
+                }
+            }
+        }
+    }
+
+    *extractAssigns(target) {
+        var declare = arguments.length <= 1 || arguments[1] === undefined ? true : arguments[1];
+        var def = arguments.length <= 2 || arguments[2] === undefined ? null : arguments[2];
+        var _iteratorNormalCompletion29 = true;
+        var _didIteratorError29 = false;
+        var _iteratorError29 = undefined;
+
+        try {
+            for (var _iterator29 = this.patterns[Symbol.iterator](), _step29; !(_iteratorNormalCompletion29 = (_step29 = _iterator29.next()).done); _iteratorNormalCompletion29 = true) {
+                var pattern = _step29.value;
 
                 if (pattern instanceof Identifier) {
                     var access = new js.Identifier(pattern.name);
@@ -1982,16 +2035,16 @@ class ObjectPattern extends Pattern {
                 }
             }
         } catch (err) {
-            _didIteratorError28 = true;
-            _iteratorError28 = err;
+            _didIteratorError29 = true;
+            _iteratorError29 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion28 && _iterator28['return']) {
-                    _iterator28['return']();
+                if (!_iteratorNormalCompletion29 && _iterator29['return']) {
+                    _iterator29['return']();
                 }
             } finally {
-                if (_didIteratorError28) {
-                    throw _iteratorError28;
+                if (_didIteratorError29) {
+                    throw _iteratorError29;
                 }
             }
         }
@@ -2006,6 +2059,10 @@ class DefaultPattern extends Pattern {
 
         this.pattern = pattern;
         this.expression = expression;
+    }
+
+    _toJS(o) {
+        return new js.AssignmentPattern(this.pattern.toJS(o), this.expression.toJS(o)).from(this);
     }
 
     *extractAssigns(jsVal) {
@@ -2051,13 +2108,13 @@ class ClassExpression extends Expression {
             props = [],
             statprops = [];
 
-        var _iteratorNormalCompletion29 = true;
-        var _didIteratorError29 = false;
-        var _iteratorError29 = undefined;
+        var _iteratorNormalCompletion30 = true;
+        var _didIteratorError30 = false;
+        var _iteratorError30 = undefined;
 
         try {
-            for (var _iterator29 = this.body[Symbol.iterator](), _step29; !(_iteratorNormalCompletion29 = (_step29 = _iterator29.next()).done); _iteratorNormalCompletion29 = true) {
-                var _line4 = _step29.value;
+            for (var _iterator30 = this.body[Symbol.iterator](), _step30; !(_iteratorNormalCompletion30 = (_step30 = _iterator30.next()).done); _iteratorNormalCompletion30 = true) {
+                var _line4 = _step30.value;
 
                 if (_line4 instanceof MethodDefinition) {
 
@@ -2080,16 +2137,16 @@ class ClassExpression extends Expression {
 
             // create class
         } catch (err) {
-            _didIteratorError29 = true;
-            _iteratorError29 = err;
+            _didIteratorError30 = true;
+            _iteratorError30 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion29 && _iterator29['return']) {
-                    _iterator29['return']();
+                if (!_iteratorNormalCompletion30 && _iterator30['return']) {
+                    _iterator30['return']();
                 }
             } finally {
-                if (_didIteratorError29) {
-                    throw _iteratorError29;
+                if (_didIteratorError30) {
+                    throw _iteratorError30;
                 }
             }
         }
@@ -2205,13 +2262,13 @@ class FunctionExpression extends Expression {
 
     hasSplat() {
         var i = 0;
-        var _iteratorNormalCompletion30 = true;
-        var _didIteratorError30 = false;
-        var _iteratorError30 = undefined;
+        var _iteratorNormalCompletion31 = true;
+        var _didIteratorError31 = false;
+        var _iteratorError31 = undefined;
 
         try {
-            for (var _iterator30 = this.params[Symbol.iterator](), _step30; !(_iteratorNormalCompletion30 = (_step30 = _iterator30.next()).done); _iteratorNormalCompletion30 = true) {
-                var param = _step30.value;
+            for (var _iterator31 = this.params[Symbol.iterator](), _step31; !(_iteratorNormalCompletion31 = (_step31 = _iterator31.next()).done); _iteratorNormalCompletion31 = true) {
+                var param = _step31.value;
 
                 if (param instanceof SpreadPattern) {
                     return i;
@@ -2220,16 +2277,16 @@ class FunctionExpression extends Expression {
                 i++;
             }
         } catch (err) {
-            _didIteratorError30 = true;
-            _iteratorError30 = err;
+            _didIteratorError31 = true;
+            _iteratorError31 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion30 && _iterator30['return']) {
-                    _iterator30['return']();
+                if (!_iteratorNormalCompletion31 && _iterator31['return']) {
+                    _iterator31['return']();
                 }
             } finally {
-                if (_didIteratorError30) {
-                    throw _iteratorError30;
+                if (_didIteratorError31) {
+                    throw _iteratorError31;
                 }
             }
         }
@@ -2259,13 +2316,13 @@ class FunctionExpression extends Expression {
     }
 
     *walkParams() {
-        var _iteratorNormalCompletion31 = true;
-        var _didIteratorError31 = false;
-        var _iteratorError31 = undefined;
+        var _iteratorNormalCompletion32 = true;
+        var _didIteratorError32 = false;
+        var _iteratorError32 = undefined;
 
         try {
-            for (var _iterator31 = this.params[Symbol.iterator](), _step31; !(_iteratorNormalCompletion31 = (_step31 = _iterator31.next()).done); _iteratorNormalCompletion31 = true) {
-                var param = _step31.value;
+            for (var _iterator32 = this.params[Symbol.iterator](), _step32; !(_iteratorNormalCompletion32 = (_step32 = _iterator32.next()).done); _iteratorNormalCompletion32 = true) {
+                var param = _step32.value;
 
                 var gen = this.body.walk();
                 var skip = undefined;
@@ -2284,16 +2341,16 @@ class FunctionExpression extends Expression {
                 }
             }
         } catch (err) {
-            _didIteratorError31 = true;
-            _iteratorError31 = err;
+            _didIteratorError32 = true;
+            _iteratorError32 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion31 && _iterator31['return']) {
-                    _iterator31['return']();
+                if (!_iteratorNormalCompletion32 && _iterator32['return']) {
+                    _iterator32['return']();
                 }
             } finally {
-                if (_didIteratorError31) {
-                    throw _iteratorError31;
+                if (_didIteratorError32) {
+                    throw _iteratorError32;
                 }
             }
         }
@@ -2322,76 +2379,6 @@ class FunctionExpression extends Expression {
         yield* this.walkBody();
     }
 
-    // processes parameters of the function, and take care of patterns in the body
-    processParams(o) {
-        var i = 0,
-            body = [],
-            params = [];
-
-        var _iteratorNormalCompletion32 = true;
-        var _didIteratorError32 = false;
-        var _iteratorError32 = undefined;
-
-        try {
-            for (var _iterator32 = this.params[Symbol.iterator](), _step32; !(_iteratorNormalCompletion32 = (_step32 = _iterator32.next()).done); _iteratorNormalCompletion32 = true) {
-                var pram = _step32.value;
-
-                var param = undefined,
-                    def = null;
-                if (pram instanceof DefaultPattern) {
-                    param = pram.pattern;
-                    def = pram.expression;
-                } else {
-                    param = pram;
-                }
-
-                if (param instanceof Identifier) {
-                    params.push(param.toJS(o));
-                    if (def !== null) {
-                        body.push((0, _jsGen.getJSAssign)(param.name, (0, _jsGen.getJSConditional)(param.name, def.toJS(o))));
-                    }
-                    i++;
-                    continue;
-                }
-
-                if (param instanceof ArrayPattern || param instanceof ObjectPattern) {
-                    var ph = (0, _vargen.nuVar)('patternPlaceholder');
-                    params.push(new js.Identifier(ph));
-                    if (def !== null) {
-                        body.push((0, _jsGen.getJSAssign)(ph, (0, _jsGen.getJSConditional)(ph, def.toJS(o))));
-                    }
-                    body.push((0, _jsGen.getJSDeclare)(param, new js.Identifier(ph), 'const'));
-
-                    i++;
-                    continue;
-                }
-
-                if (param instanceof SpreadPattern) {
-                    body.push((0, _jsGen.getJSDeclare)(param.pattern, (0, _jsGen.getJSMethodCall)([LIB, 'restargs'], [new js.Identifier('arguments'), new js.Literal(i)]), 'const'));
-
-                    break;
-                }
-
-                param.error('This should not be here!');
-            }
-        } catch (err) {
-            _didIteratorError32 = true;
-            _iteratorError32 = err;
-        } finally {
-            try {
-                if (!_iteratorNormalCompletion32 && _iterator32['return']) {
-                    _iterator32['return']();
-                }
-            } finally {
-                if (_didIteratorError32) {
-                    throw _iteratorError32;
-                }
-            }
-        }
-
-        return { params: params, prebody: body };
-    }
-
     regularToJs(o) {
         var noparams = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
 
@@ -2403,18 +2390,9 @@ class FunctionExpression extends Expression {
 
         var i = 0;
 
-        if (noparams) {
-            var params = [];
-            var prebody = [];
-        } else {
-            var _processParams = this.processParams(o);
-
-            var params = _processParams.params;
-            var prebody = _processParams.prebody;
-        }
-
-        body.body.prepend(statement(prebody));
-        return new js.FunctionExpression(null, params, body, null);
+        return new js.FunctionExpression(null, noparams ? [] : this.params.map(function (param) {
+            return param.toJS(o);
+        }), body, null);
     }
 
     generatorToJs(o) {
@@ -2434,16 +2412,11 @@ class FunctionExpression extends Expression {
     asyncGeneratorToJs(o) {
         var noparams = arguments.length <= 1 || arguments[1] === undefined ? false : arguments[1];
 
-        var ctrlVar = this._ctrl = (0, _vargen.nuVar)('observableController');
+        var ctrlVar = this._ctrl = (0, _vargen.nuVar)('ctrl');
 
         var ctrl = (0, _jsGen.getJSAssign)(ctrlVar, (0, _jsGen.getJSMethodCall)([LIB, 'getObservableCtrl'], []), 'const');
         var mem = new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([ctrlVar, 'code']), new js.CallExpression(new js.MemberExpression(this.asyncToJs(o, true), new js.Identifier("bind")), [new js.ThisExpression()]));
         var ret = new js.ReturnStatement((0, _jsGen.getJSMemberExpression)([ctrlVar, 'observable']));
-
-        var _processParams2 = this.processParams(o);
-
-        var params = _processParams2.params;
-        var prebody = _processParams2.prebody;
 
         var block = new js.BlockStatement([ctrl, mem, ret].map(function (el) {
             if (el instanceof js.Expression) {
@@ -2453,14 +2426,9 @@ class FunctionExpression extends Expression {
             }
         }));
 
-        if (noparams) {
-            params = [];
-            prebody = [];
-        }
-
-        block.body.prepend(prebody);
-
-        return new js.FunctionExpression(null, params, block);
+        return new js.FunctionExpression(null, noparams ? [] : this.params.map(function (p) {
+            return p.toJS(o);
+        }), block);
     }
 
     get async() {
@@ -2507,7 +2475,7 @@ class UnaryExpression extends Expression {
             this.error('Invalid unary operator!');
         }
 
-        return new js.UnaryExpression(operator, this.prefix, this.argument.toJS(o)).from(this);
+        return new js.UnaryExpression(operator, this.argument.toJS(o), this.prefix).from(this);
     }
 }
 
@@ -2627,52 +2595,15 @@ class AssignmentExpression extends Expression {
     }
 
     _toJS(o) {
-        if (this.left instanceof Identifier || this.left instanceof MemberExpression) {
-            var rightHandSide = undefined;
-            if (this.operator in smoothOperators) {
-                var trans = smoothOperators[this.operator];
-                var left = this.left.toJS(o);
-                var right = trans(left, this.right.toJS(o));
+        var rightHandSide = undefined;
+        if (this.operator in smoothOperators) {
+            var trans = smoothOperators[this.operator];
+            var left = this.left.toJS(o);
+            var right = trans(left, this.right.toJS(o));
 
-                return new js.AssignmentExpression('=', left, right).from(this);
-            } else {
-                return new js.AssignmentExpression(this.operator, this.left.toJS(o), this.right.toJS(o)).from(this);
-            }
-        } else if (this.left instanceof Pattern) {
-            if (this.operator !== '=') {
-                this.left.error('Patterns not allowed with assignment type');
-            }
-
-            var nvar = (0, _vargen.nuVar)('patternPlaceholder'),
-                arr = [new _jsGen.getJSAssign(nvar, this.right)];
-            var _iteratorNormalCompletion33 = true;
-            var _didIteratorError33 = false;
-            var _iteratorError33 = undefined;
-
-            try {
-                for (var _iterator33 = this.left.extractAssigns(new js.Identifier(nvar))[Symbol.iterator](), _step33; !(_iteratorNormalCompletion33 = (_step33 = _iterator33.next()).done); _iteratorNormalCompletion33 = true) {
-                    var assign = _step33.value;
-
-                    arr.push(assign);
-                }
-            } catch (err) {
-                _didIteratorError33 = true;
-                _iteratorError33 = err;
-            } finally {
-                try {
-                    if (!_iteratorNormalCompletion33 && _iterator33['return']) {
-                        _iterator33['return']();
-                    }
-                } finally {
-                    if (_didIteratorError33) {
-                        throw _iteratorError33;
-                    }
-                }
-            }
-
-            return arr;
+            return new js.AssignmentExpression('=', left, right).from(this);
         } else {
-            this.left.error('Invalid assignable!');
+            return new js.AssignmentExpression(this.operator, this.left.toJS(o), this.right.toJS(o)).from(this);
         }
     }
 }
@@ -2707,7 +2638,97 @@ class LogicalExpression extends Expression {
 
 exports.LogicalExpression = LogicalExpression;
 
-class CallExpression extends Expression {
+class QuestionableExpression extends Expression {
+
+    // compile some.weird?.property?.chain
+    getChain(stack, heads, o) {
+        throw new Error('Must implement getChain method!');
+    }
+
+    get subject() {
+        throw new Error('Must implement subject getter!');
+    }
+
+    // compile some.weird?.property?.chain
+    getChain(stack, heads, o) {
+        var _this2 = this;
+
+        if (this.doubtful) {
+            var _ret = (function () {
+                var _getOpvars4 = _this2.getOpvars(1);
+
+                var _getOpvars42 = _slicedToArray(_getOpvars4, 1);
+
+                var op = _getOpvars42[0];
+
+                var id = new js.Identifier(op);
+                var ref = _this2.getJSRef(id, o);
+                var fn = function fn(node) {
+                    if (ref instanceof js.CallExpression) {
+                        ref.callee = node;
+                    } else {
+                        ref.object = node;
+                    }
+                };
+
+                if (_this2.subject instanceof QuestionableExpression) {
+                    stack.push(_this2.subject.getChain(stack, heads, o));
+                } else {
+                    stack.push(_this2.subject.toJS(o));
+                }
+                heads.push([op, fn, _this2 instanceof CallExpression]);
+                return {
+                    v: ref
+                };
+            })();
+
+            if (typeof _ret === 'object') return _ret.v;
+        } else {
+            var left = this.subject instanceof QuestionableExpression ? this.subject.getChain(stack, heads, o) : this.subject.toJS(o);
+
+            return this.getJSRef(left, o);
+        }
+    }
+
+    _toJS(o) {
+        var stack = [],
+            heads = [];
+        var undie = new js.UnaryExpression('void', new js.Literal(0));
+        stack.push(this.getChain(stack, heads, o));
+
+        var pointer = stack[stack.length - 1];
+        for (var i = heads.length - 1; i >= 0; i--) {
+            var _heads$i = _slicedToArray(heads[i], 3);
+
+            var _name4 = _heads$i[0];
+            var changeNode = _heads$i[1];
+            var isCall = _heads$i[2];
+
+            var node = stack[i];
+            if (isCall) {
+                if (node instanceof js.MemberExpression && !node.computed) {
+                    var id = new js.Identifier(_name4),
+                        prop = node.property;
+                    changeNode(new js.MemberExpression(id, prop));
+                    pointer = new js.ConditionalExpression(new js.BinaryExpression('!=', new js.MemberExpression(new js.AssignmentExpression('=', id, node.object), prop), new js.Literal(null)), pointer, undie);
+                    continue;
+                }
+            }
+
+            pointer = new js.ConditionalExpression(new js.BinaryExpression('!=', new js.AssignmentExpression('=', new js.Identifier(_name4), node), new js.Literal(null)), pointer, undie);
+        }
+
+        return pointer;
+    }
+
+    getJSRef() {
+        throw new Error("QE extendees must implement getJSRef!");
+    }
+}
+
+exports.QuestionableExpression = QuestionableExpression;
+
+class CallExpression extends QuestionableExpression {
     constructor(callee, args) {
         var isNew = arguments.length <= 2 || arguments[2] === undefined ? false : arguments[2];
         var doubtful = arguments.length <= 3 || arguments[3] === undefined ? false : arguments[3];
@@ -2720,53 +2741,15 @@ class CallExpression extends Expression {
         this.doubtful = doubtful;
     }
 
-    _toJS(o) {
-        var args = [],
-            callee = this.callee.toJS(o),
-            ctor = this.isNew ? js.NewExpression : js.CallExpression;
+    getJSRef(subject, o) {
+        var ctor = this.isNew ? js.NewExpression : js.CallExpression;
+        return new ctor(subject, this.arguments.map(function (arg) {
+            return arg.toJS(o);
+        }));
+    }
 
-        var _iteratorNormalCompletion34 = true;
-        var _didIteratorError34 = false;
-        var _iteratorError34 = undefined;
-
-        try {
-            for (var _iterator34 = this.arguments[Symbol.iterator](), _step34; !(_iteratorNormalCompletion34 = (_step34 = _iterator34.next()).done); _iteratorNormalCompletion34 = true) {
-                var argument = _step34.value;
-
-                args.push(argument.toJS(o));
-            }
-        } catch (err) {
-            _didIteratorError34 = true;
-            _iteratorError34 = err;
-        } finally {
-            try {
-                if (!_iteratorNormalCompletion34 && _iterator34['return']) {
-                    _iterator34['return']();
-                }
-            } finally {
-                if (_didIteratorError34) {
-                    throw _iteratorError34;
-                }
-            }
-        }
-
-        if (this.doubtful) {
-            var _getOpvars4 = this.getOpvars(1);
-
-            var _getOpvars42 = _slicedToArray(_getOpvars4, 1);
-
-            var opvar = _getOpvars42[0];
-
-            var left = (0, _jsGen.getJSAssign)(opvar, callee);
-            var undie = new js.Identifier('undefined');
-
-            var node = new js.ConditionalExpression(new js.BinaryExpression('===', left, undie), undie, new ctor(left.left, args));
-
-            this.freeOpvars([opvar]);
-            return node.from(this);
-        } else {
-            return new ctor(callee, args).from(this);
-        }
+    get subject() {
+        return this.callee;
     }
 }
 
@@ -2776,7 +2759,7 @@ class NewExpression extends CallExpression {}
 
 exports.NewExpression = NewExpression;
 
-class MemberExpression extends Expression {
+class MemberExpression extends QuestionableExpression {
     // doubtful parameter is true if there there are question marks involved
     constructor(object, property) {
         var computed = arguments.length <= 2 || arguments[2] === undefined ? false : arguments[2];
@@ -2790,26 +2773,12 @@ class MemberExpression extends Expression {
         this.doubtful = doubtful;
     }
 
-    _toJS(o) {
-        if (!this.doubtful) {
-            var object = this.object.toJS(o);
-            var right = this.property.toJS(o);
-            return new js.MemberExpression(object, right, this.computed).from(this);
-        } else {
-            var _getOpvars5 = this.getOpvars(1);
+    getJSRef(subject, o) {
+        return new js.MemberExpression(subject, this.property.toJS(o), this.computed);
+    }
 
-            var _getOpvars52 = _slicedToArray(_getOpvars5, 1);
-
-            var opvar = _getOpvars52[0];
-
-            var left = (0, _jsGen.getJSAssign)(opvar, this.object.toJS(o));
-            var undie = new js.Identifier('undefined');
-
-            var node = new js.ConditionalExpression(new js.BinaryExpression('===', left, undie), undie, new js.MemberExpression(left.left, this.property.toJS(o), this.computed));
-
-            this.freeOpvars([opvar]);
-            return node.from(this);
-        }
+    get subject() {
+        return this.object;
     }
 }
 
@@ -2823,7 +2792,7 @@ class DefinedExpression extends Expression {
     }
 
     _toJS(o) {
-        return new js.BinaryExpression('!==', this.expression.toJS(o), new js.Identifier('undefined')).from(this);
+        return new js.BinaryExpression('!=', this.expression.toJS(o), new js.Identifier('null')).from(this);
     }
 }
 
@@ -2850,20 +2819,7 @@ class CatchClause extends Node {
     }
 
     _toJS(o) {
-        if (this.param instanceof Identifier) {
-            return new js.CatchClause(this.param.toJS(o), this.body.toJS(o)).from(this);
-        } else if (this.param instanceof Pattern) {
-            // same usual trickery to support error destructuring in catch clause
-            var placeholder = (0, _vargen.nuVar)('patternPlaceholder');
-            var holderVar = new js.Identifier(placeholder);
-            var declarations = (0, _jsGen.getJSDeclare)(this.param, holderVar, 'const');
-            var block = this.body.toJS(o);
-
-            block.body.unshift(declarations);
-            return new js.CatchClause(holderVar, block).from(this);
-        }
-
-        this.param.error('Unrecognized parameter type!');
+        return new js.CatchClause(this.param.toJS(o), this.body.toJS(o)).from(this);
     }
 }
 
@@ -2902,13 +2858,13 @@ class TemplateString extends Expression {
     static removeEscapes(string) {
         var buff = [];
         var escapeMode = false;
-        var _iteratorNormalCompletion35 = true;
-        var _didIteratorError35 = false;
-        var _iteratorError35 = undefined;
+        var _iteratorNormalCompletion33 = true;
+        var _didIteratorError33 = false;
+        var _iteratorError33 = undefined;
 
         try {
-            for (var _iterator35 = string[Symbol.iterator](), _step35; !(_iteratorNormalCompletion35 = (_step35 = _iterator35.next()).done); _iteratorNormalCompletion35 = true) {
-                var c = _step35.value;
+            for (var _iterator33 = string[Symbol.iterator](), _step33; !(_iteratorNormalCompletion33 = (_step33 = _iterator33.next()).done); _iteratorNormalCompletion33 = true) {
+                var c = _step33.value;
 
                 if (escapeMode) {
                     escapeMode = false;
@@ -2927,16 +2883,16 @@ class TemplateString extends Expression {
                 }
             }
         } catch (err) {
-            _didIteratorError35 = true;
-            _iteratorError35 = err;
+            _didIteratorError33 = true;
+            _iteratorError33 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion35 && _iterator35['return']) {
-                    _iterator35['return']();
+                if (!_iteratorNormalCompletion33 && _iterator33['return']) {
+                    _iterator33['return']();
                 }
             } finally {
-                if (_didIteratorError35) {
-                    throw _iteratorError35;
+                if (_didIteratorError33) {
+                    throw _iteratorError33;
                 }
             }
         }
@@ -2949,13 +2905,13 @@ class TemplateString extends Expression {
         var parser = require('./parser');
 
         this.parts = [];
-        var _iteratorNormalCompletion36 = true;
-        var _didIteratorError36 = false;
-        var _iteratorError36 = undefined;
+        var _iteratorNormalCompletion34 = true;
+        var _didIteratorError34 = false;
+        var _iteratorError34 = undefined;
 
         try {
-            for (var _iterator36 = parts[Symbol.iterator](), _step36; !(_iteratorNormalCompletion36 = (_step36 = _iterator36.next()).done); _iteratorNormalCompletion36 = true) {
-                var part = _step36.value;
+            for (var _iterator34 = parts[Symbol.iterator](), _step34; !(_iteratorNormalCompletion34 = (_step34 = _iterator34.next()).done); _iteratorNormalCompletion34 = true) {
+                var part = _step34.value;
 
                 // parts alternate between strings and arrays of tokens
                 if (part instanceof Array) {
@@ -2979,16 +2935,16 @@ class TemplateString extends Expression {
                 }
             }
         } catch (err) {
-            _didIteratorError36 = true;
-            _iteratorError36 = err;
+            _didIteratorError34 = true;
+            _iteratorError34 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion36 && _iterator36['return']) {
-                    _iterator36['return']();
+                if (!_iteratorNormalCompletion34 && _iterator34['return']) {
+                    _iterator34['return']();
                 }
             } finally {
-                if (_didIteratorError36) {
-                    throw _iteratorError36;
+                if (_didIteratorError34) {
+                    throw _iteratorError34;
                 }
             }
         }
@@ -3119,13 +3075,13 @@ class ImportDeclaration extends ModuleDeclaration {
             declarators.push(new js.VariableDeclarator(ivar, requiring));
         }
 
-        var _iteratorNormalCompletion37 = true;
-        var _didIteratorError37 = false;
-        var _iteratorError37 = undefined;
+        var _iteratorNormalCompletion35 = true;
+        var _didIteratorError35 = false;
+        var _iteratorError35 = undefined;
 
         try {
-            for (var _iterator37 = this.specifiers[Symbol.iterator](), _step37; !(_iteratorNormalCompletion37 = (_step37 = _iterator37.next()).done); _iteratorNormalCompletion37 = true) {
-                var specifier = _step37.value;
+            for (var _iterator35 = this.specifiers[Symbol.iterator](), _step35; !(_iteratorNormalCompletion35 = (_step35 = _iterator35.next()).done); _iteratorNormalCompletion35 = true) {
+                var specifier = _step35.value;
 
                 if (specifier instanceof ImportDefaultSpecifier) {
                     declarators.push(new js.VariableDeclarator(new js.Identifier(specifier.local.name), new js.MemberExpression(ivar, (0, _jsGen.getJSMemberExpression)([support, 'symbols', 'default']), true)));
@@ -3136,16 +3092,16 @@ class ImportDeclaration extends ModuleDeclaration {
                 }
             }
         } catch (err) {
-            _didIteratorError37 = true;
-            _iteratorError37 = err;
+            _didIteratorError35 = true;
+            _iteratorError35 = err;
         } finally {
             try {
-                if (!_iteratorNormalCompletion37 && _iterator37['return']) {
-                    _iterator37['return']();
+                if (!_iteratorNormalCompletion35 && _iterator35['return']) {
+                    _iterator35['return']();
                 }
             } finally {
-                if (_didIteratorError37) {
-                    throw _iteratorError37;
+                if (_didIteratorError35) {
+                    throw _iteratorError35;
                 }
             }
         }
@@ -3185,27 +3141,27 @@ class ExportNamedDeclaration extends ExportDeclaration {
         var lines = [];
         var gvar = o.exportVar || (0, _vargen.globalVar)('exports');
         if (this.declaration === null) {
-            var _iteratorNormalCompletion38 = true;
-            var _didIteratorError38 = false;
-            var _iteratorError38 = undefined;
+            var _iteratorNormalCompletion36 = true;
+            var _didIteratorError36 = false;
+            var _iteratorError36 = undefined;
 
             try {
-                for (var _iterator38 = this.specifiers[Symbol.iterator](), _step38; !(_iteratorNormalCompletion38 = (_step38 = _iterator38.next()).done); _iteratorNormalCompletion38 = true) {
-                    var specifier = _step38.value;
+                for (var _iterator36 = this.specifiers[Symbol.iterator](), _step36; !(_iteratorNormalCompletion36 = (_step36 = _iterator36.next()).done); _iteratorNormalCompletion36 = true) {
+                    var specifier = _step36.value;
 
                     lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, specifier.exported.name]), new js.Identifier(specifier.local.name))).from(this));
                 }
             } catch (err) {
-                _didIteratorError38 = true;
-                _iteratorError38 = err;
+                _didIteratorError36 = true;
+                _iteratorError36 = err;
             } finally {
                 try {
-                    if (!_iteratorNormalCompletion38 && _iterator38['return']) {
-                        _iterator38['return']();
+                    if (!_iteratorNormalCompletion36 && _iterator36['return']) {
+                        _iterator36['return']();
                     }
                 } finally {
-                    if (_didIteratorError38) {
-                        throw _iteratorError38;
+                    if (_didIteratorError36) {
+                        throw _iteratorError36;
                     }
                 }
             }
@@ -3213,45 +3169,45 @@ class ExportNamedDeclaration extends ExportDeclaration {
             var declaration = this.declaration;
             if (declaration instanceof VariableDeclaration) {
                 lines.push(declaration.toJS(o));
-                var _iteratorNormalCompletion39 = true;
-                var _didIteratorError39 = false;
-                var _iteratorError39 = undefined;
+                var _iteratorNormalCompletion37 = true;
+                var _didIteratorError37 = false;
+                var _iteratorError37 = undefined;
 
                 try {
-                    for (var _iterator39 = declaration.extractVariables()[Symbol.iterator](), _step39; !(_iteratorNormalCompletion39 = (_step39 = _iterator39.next()).done); _iteratorNormalCompletion39 = true) {
-                        var name = _step39.value;
+                    for (var _iterator37 = declaration.extractVariables()[Symbol.iterator](), _step37; !(_iteratorNormalCompletion37 = (_step37 = _iterator37.next()).done); _iteratorNormalCompletion37 = true) {
+                        var name = _step37.value;
 
                         lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, name]), new js.Identifier(name))).from(this));
                     }
                 } catch (err) {
-                    _didIteratorError39 = true;
-                    _iteratorError39 = err;
+                    _didIteratorError37 = true;
+                    _iteratorError37 = err;
                 } finally {
                     try {
-                        if (!_iteratorNormalCompletion39 && _iterator39['return']) {
-                            _iterator39['return']();
+                        if (!_iteratorNormalCompletion37 && _iterator37['return']) {
+                            _iterator37['return']();
                         }
                     } finally {
-                        if (_didIteratorError39) {
-                            throw _iteratorError39;
+                        if (_didIteratorError37) {
+                            throw _iteratorError37;
                         }
                     }
                 }
             } else {
-                var _name4 = declaration.identifier.name;
+                var _name5 = declaration.identifier.name;
                 if (declaration instanceof FunctionDeclaration) {
                     var scope = this.program;
 
-                    if (scope._funcDeclarations.has(_name4)) {
+                    if (scope._funcDeclarations.has(_name5)) {
                         declaration.error('Cannot declare function more than once!');
                     }
 
-                    scope._funcDeclarations.set(_name4, declaration.func.toJS(o));
+                    scope._funcDeclarations.set(_name5, declaration.func.toJS(o));
                 } else {
                     lines.push(declaration.toJS(o));
                 }
 
-                lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, _name4]), new js.Identifier(_name4))).from(this));
+                lines.push(new js.ExpressionStatement(new js.AssignmentExpression('=', (0, _jsGen.getJSMemberExpression)([gvar, _name5]), new js.Identifier(_name5))).from(this));
             }
         }
 
@@ -3274,19 +3230,19 @@ class ExportDefaultDeclaration extends ExportDeclaration {
         if (this.declaration instanceof Expression) {
             return new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default']), true), line.declaration)).from(this);
         } else {
-            var _name5 = this.declaration.identifier.name;
+            var _name6 = this.declaration.identifier.name;
             if (this.declaration instanceof FunctionDeclaration) {
                 var scope = this.program;
 
-                if (scope._funcDeclarations.has(_name5)) {
+                if (scope._funcDeclarations.has(_name6)) {
                     this.declaration.error('Cannot declare function more than once!');
                 }
 
-                scope._funcDeclarations.set(_name5, this.declaration.func.toJS(o));
+                scope._funcDeclarations.set(_name6, this.declaration.func.toJS(o));
 
-                return new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default']), true), new js.Identifier(_name5))).from(this);
+                return new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default']), true), new js.Identifier(_name6))).from(this);
             } else {
-                return [this.declaration.toJS(o), new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default'])), true), new js.Identifier(_name5)).from(this)];
+                return [this.declaration.toJS(o), new js.ExpressionStatement(new js.AssignmentExpression('=', new js.MemberExpression(new js.Identifier(exportVar), (0, _jsGen.getJSMemberExpression)([bzbVar, 'symbols', 'default'])), true), new js.Identifier(_name6)).from(this)];
             }
         }
     }

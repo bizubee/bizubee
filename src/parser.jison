@@ -539,11 +539,11 @@ CallExpression:
 |   Super Arguments                                 { $$ = new yy.CallExpression($1, $2, false).pos(@$)}
 |   Expression 'Q_CALL' Arguments                   { $$ = new yy.CallExpression($1, $3, false, true).pos(@$)}
 |   'NEW' MemberExpression Arguments                { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
-|   'NEW' MemberExpression 'Q_CALL' Arguments       { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
+|   'NEW' MemberExpression 'Q_CALL' Arguments       { $$ = new yy.CallExpression($2, $4, true, true).pos(@$)}
 |   'NEW' Identifier Arguments                      { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
-|   'NEW' Identifier 'Q_CALL' Arguments             { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
+|   'NEW' Identifier 'Q_CALL' Arguments             { $$ = new yy.CallExpression($2, $4, true, true).pos(@$)}
 |   'NEW' WrappedExpression Arguments               { $$ = new yy.CallExpression($2, $3, true).pos(@$)}
-|   'NEW' WrappedExpression 'Q_CALL' Arguments      { $$ = new yy.CallExpression($2, $3, true, true).pos(@$)}
+|   'NEW' WrappedExpression 'Q_CALL' Arguments      { $$ = new yy.CallExpression($2, $4, true, true).pos(@$)}
 ;
 
 

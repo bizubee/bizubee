@@ -1,38 +1,31 @@
 
 
-throwsError() -> {
-    var t = null
-    return t.noprop.noprop
-}
-
-doesntThrowError() -> {
-    return 5
-}
 
 test('Try-Catch statement with error', (api) -> {
     var error
     
     try {
-        throwsError()
+        api.throwError()
         api.fail()
     } catch e {
         error = e
     }
     
-    api.isInstance(error, Error)
+    api.is(error, 'object')
+    api.is(error.constructor, "Error")
     api.done()
 })
 
 test('Try-Catch statement without error', (api) -> {
     var msg
     
-    try {
-        doesntThrowError()
+    try
+        api.dontThrowError()
         msg = 'no error'
-    } catch e {
+    catch e do
         msg = e.message
         api.fail()
-    }
+    
     
     api.eq(msg, 'no error')
     api.done()
@@ -40,7 +33,7 @@ test('Try-Catch statement without error', (api) -> {
 
 test('Try-Finally statement with error', (api) -> {
     try {
-        throwsError()
+        api.throwError()
     } finally {
         api.done()
     }
@@ -50,7 +43,7 @@ test('Try-Finally statement with error', (api) -> {
 
 test('Try-Finally statement without error', (api) -> {
     try {
-        doesntThrowError()
+        api.dontThrowError()
     } finally {
         api.done()
     }
@@ -60,7 +53,7 @@ test('Try-Finally statement without error', (api) -> {
 
 test('Try-Finally statement with error', (api) -> {
     try {
-        throwsError()
+        api.throwError()
     } finally {
         api.done()
     }
@@ -70,7 +63,7 @@ test('Try-Finally statement with error', (api) -> {
 
 test('Try-Catch-Finally without error', (api) -> {
     try {
-        doesntThrowError()
+        api.dontThrowError()
     } finally {
         api.done()
     }

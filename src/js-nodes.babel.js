@@ -95,32 +95,32 @@ export class Node {
 	}
 	
 	from(origin) {
-		var rootfile = (origin.type === 'Program') ?
-			origin.parameters.rootfile :
-			origin.program.parameters.rootfile;
-		var relpath;
+		if (origin.program.parameters.browser) {
+			var rootfile = (origin.type === 'Program') ?
+				origin.parameters.rootfile :
+				origin.program.parameters.rootfile;
+			var filepath;
 
-
-		if (rootfile === origin.filename) {
-			relpath = path.basename(rootfile);
-		} else {
-			const dir = path.dirname(rootfile);
-			relpath = path.relative(dir, origin.filename);			
-		}
-
-		var [left, up, right, down] = origin.position;
-		this.loc = {
-			source: relpath,
-			start: {
-				column: left,
-				line: up + 1
-			},
-			end: {
-				column: right,
-				line: down + 1
+			if (rootfile === origin.filename) {
+				filepath = path.basename(rootfile);
+			} else {
+				const dir = path.dirname(rootfile);
+				filepath = path.relative(dir, origin.filename);			
 			}
-		};
 
+			var [left, up, right, down] = origin.position;
+			this.loc = {
+				source: filepath,
+				start: {
+					column: left,
+					line: up + 1
+				},
+				end: {
+					column: right,
+					line: down + 1
+				}
+			};
+		}
 		return this;
 	}
 }
@@ -293,11 +293,12 @@ export class ObjectExpression extends Expression {
 }
 
 export class Property extends Node {
-	constructor(key, value, kind = 'init') {
+	constructor(key, value, kind = 'init', method = false) {
 		super();
 		this.key = key;
 		this.value = value;
 		this.kind = kind;
+		this.method = method;
 	}
 }
 
@@ -352,11 +353,11 @@ export class SequenceExpression extends Expression {
 }
 
 export class UnaryExpression extends Expression {
-	constructor(operator, prefix, argument) {
+	constructor(operator, argument, prefix = true) {
 		super();
 		this.operator = operator;
-		this.prefix = prefix;
 		this.argument = argument;
+		this.prefix = prefix;
 	}
 }
 
@@ -437,12 +438,6 @@ export class SpreadElement extends Node {
 	}
 }
 
-export class RestElement extends Pattern {
-	constructor(pattern) {
-		super();
-		this.argument = pattern;
-	}
-}
 
 export class SwitchCase extends Node {
 	constructor(test, consequent) {
@@ -477,13 +472,9 @@ export class Literal extends Expression {
 
 // like properties but used in object patterns
 export class AssignmentProperty extends Property {
-	constructor(value) {
-		super();
-
+	constructor(key, value) {
+		super(key, value, 'init', false);
 		this.type = "Property";
-		this.value = value;
-		this.kind = "init";
-		this.method = false;
 	}
 }
 
@@ -497,3 +488,34 @@ export class YieldExpression extends Expression {
 		this.delegate = delegate;
 	}
 }
+
+export class ObjectPattern extends Pattern {
+	constructor(properties) {
+		super();
+		this.properties = properties;
+	}
+}
+
+export class ArrayPattern extends Pattern {
+	constructor(elements) {
+		super();
+		this.elements = elements;
+	}
+}
+
+export class RestElement extends Pattern {
+	constructor(argument) {
+		super();
+		this.argument = argument;
+	}
+}
+
+export class AssignmentPattern extends Pattern {
+	constructor(left, right) {
+		super();
+
+		this.left = left;
+		this.right = right;
+	}
+}
+

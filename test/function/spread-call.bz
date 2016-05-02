@@ -20,7 +20,7 @@ test('Method call with spread', (api) -> {
         fn: (a, b, c, d) -> {
             api.eq(this, obj)
             api.assert(d == undefined)
-            
+
             return [a, 2 * b, c]
         }
     }

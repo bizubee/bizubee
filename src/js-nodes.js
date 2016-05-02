@@ -59,35 +59,36 @@ class Node {
 	}
 
 	from(origin) {
-		var rootfile = origin.type === 'Program' ? origin.parameters.rootfile : origin.program.parameters.rootfile;
-		var relpath;
+		if (origin.program.parameters.browser) {
+			var rootfile = origin.type === 'Program' ? origin.parameters.rootfile : origin.program.parameters.rootfile;
+			var filepath;
 
-		if (rootfile === origin.filename) {
-			relpath = path.basename(rootfile);
-		} else {
-			var dir = path.dirname(rootfile);
-			relpath = path.relative(dir, origin.filename);
-		}
-
-		var _origin$position = _slicedToArray(origin.position, 4);
-
-		var left = _origin$position[0];
-		var up = _origin$position[1];
-		var right = _origin$position[2];
-		var down = _origin$position[3];
-
-		this.loc = {
-			source: relpath,
-			start: {
-				column: left,
-				line: up + 1
-			},
-			end: {
-				column: right,
-				line: down + 1
+			if (rootfile === origin.filename) {
+				filepath = path.basename(rootfile);
+			} else {
+				var dir = path.dirname(rootfile);
+				filepath = path.relative(dir, origin.filename);
 			}
-		};
 
+			var _origin$position = _slicedToArray(origin.position, 4);
+
+			var left = _origin$position[0];
+			var up = _origin$position[1];
+			var right = _origin$position[2];
+			var down = _origin$position[3];
+
+			this.loc = {
+				source: filepath,
+				start: {
+					column: left,
+					line: up + 1
+				},
+				end: {
+					column: right,
+					line: down + 1
+				}
+			};
+		}
 		return this;
 	}
 }
@@ -314,11 +315,13 @@ exports.ObjectExpression = ObjectExpression;
 class Property extends Node {
 	constructor(key, value) {
 		var kind = arguments.length <= 2 || arguments[2] === undefined ? 'init' : arguments[2];
+		var method = arguments.length <= 3 || arguments[3] === undefined ? false : arguments[3];
 
 		super();
 		this.key = key;
 		this.value = value;
 		this.kind = kind;
+		this.method = method;
 	}
 }
 
@@ -395,11 +398,13 @@ class SequenceExpression extends Expression {
 exports.SequenceExpression = SequenceExpression;
 
 class UnaryExpression extends Expression {
-	constructor(operator, prefix, argument) {
+	constructor(operator, argument) {
+		var prefix = arguments.length <= 2 || arguments[2] === undefined ? true : arguments[2];
+
 		super();
 		this.operator = operator;
-		this.prefix = prefix;
 		this.argument = argument;
+		this.prefix = prefix;
 	}
 }
 
@@ -500,15 +505,6 @@ class SpreadElement extends Node {
 
 exports.SpreadElement = SpreadElement;
 
-class RestElement extends Pattern {
-	constructor(pattern) {
-		super();
-		this.argument = pattern;
-	}
-}
-
-exports.RestElement = RestElement;
-
 class SwitchCase extends Node {
 	constructor(test, consequent) {
 		super();
@@ -549,13 +545,9 @@ class Literal extends Expression {
 exports.Literal = Literal;
 
 class AssignmentProperty extends Property {
-	constructor(value) {
-		super();
-
+	constructor(key, value) {
+		super(key, value, 'init', false);
 		this.type = "Property";
-		this.value = value;
-		this.kind = "init";
-		this.method = false;
 	}
 }
 
@@ -574,3 +566,41 @@ class YieldExpression extends Expression {
 }
 
 exports.YieldExpression = YieldExpression;
+
+class ObjectPattern extends Pattern {
+	constructor(properties) {
+		super();
+		this.properties = properties;
+	}
+}
+
+exports.ObjectPattern = ObjectPattern;
+
+class ArrayPattern extends Pattern {
+	constructor(elements) {
+		super();
+		this.elements = elements;
+	}
+}
+
+exports.ArrayPattern = ArrayPattern;
+
+class RestElement extends Pattern {
+	constructor(argument) {
+		super();
+		this.argument = argument;
+	}
+}
+
+exports.RestElement = RestElement;
+
+class AssignmentPattern extends Pattern {
+	constructor(left, right) {
+		super();
+
+		this.left = left;
+		this.right = right;
+	}
+}
+
+exports.AssignmentPattern = AssignmentPattern;

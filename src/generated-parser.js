@@ -461,7 +461,7 @@ case 222: case 224: case 226:
  this.$ = new yy.CallExpression($$[$0-1], $$[$0], true).pos(this._$)
 break;
 case 223: case 225: case 227:
- this.$ = new yy.CallExpression($$[$0-2], $$[$0-1], true, true).pos(this._$)
+ this.$ = new yy.CallExpression($$[$0-2], $$[$0], true, true).pos(this._$)
 break;
 case 228:
  this.$ = $$[$0].value
