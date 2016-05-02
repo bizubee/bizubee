@@ -2676,6 +2676,7 @@ class QuestionableExpression extends Expression {
                 } else {
                     stack.push(_this2.subject.toJS(o));
                 }
+
                 heads.push([op, fn, _this2 instanceof CallExpression]);
                 return {
                     v: ref
@@ -2706,11 +2707,23 @@ class QuestionableExpression extends Expression {
 
             var node = stack[i];
             if (isCall) {
-                if (node instanceof js.MemberExpression && !node.computed) {
+                if (node instanceof js.MemberExpression) {
                     var id = new js.Identifier(_name4),
                         prop = node.property;
-                    changeNode(new js.MemberExpression(id, prop));
-                    pointer = new js.ConditionalExpression(new js.BinaryExpression('!=', new js.MemberExpression(new js.AssignmentExpression('=', id, node.object), prop), new js.Literal(null)), pointer, undie);
+                    if (node.computed) {
+                        var _getOpvars5 = this.getOpvars(1);
+
+                        var _getOpvars52 = _slicedToArray(_getOpvars5, 1);
+
+                        var propHolder = _getOpvars52[0];
+
+                        var pid = new js.Identifier(propHolder);
+                        changeNode(new js.MemberExpression(id, pid, true));
+                        pointer = new js.ConditionalExpression(new js.BinaryExpression('!=', new js.MemberExpression(new js.AssignmentExpression('=', id, node.object), new js.AssignmentExpression('=', pid, prop), true), new js.Literal(null)), pointer, undie);
+                    } else {
+                        changeNode(new js.MemberExpression(id, prop));
+                        pointer = new js.ConditionalExpression(new js.BinaryExpression('!=', new js.MemberExpression(new js.AssignmentExpression('=', id, node.object), prop), new js.Literal(null)), pointer, undie);
+                    }
                     continue;
                 }
             }
@@ -2718,7 +2731,7 @@ class QuestionableExpression extends Expression {
             pointer = new js.ConditionalExpression(new js.BinaryExpression('!=', new js.AssignmentExpression('=', new js.Identifier(_name4), node), new js.Literal(null)), pointer, undie);
         }
 
-        return pointer;
+        return pointer.from(this);
     }
 
     getJSRef() {

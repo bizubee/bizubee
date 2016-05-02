@@ -2233,26 +2233,50 @@ export class QuestionableExpression extends Expression {
             const [name, changeNode, isCall] = heads[i];
             const node = stack[i];
             if (isCall) {
-                if (node instanceof js.MemberExpression && !node.computed) {
+                if (node instanceof js.MemberExpression) {
                     const id = new js.Identifier(name), prop = node.property;
-                    changeNode(new js.MemberExpression(id, prop));
-                    pointer = new js.ConditionalExpression(
-                        new js.BinaryExpression(
-                            '!=',
-                            new js.MemberExpression(
-                                new js.AssignmentExpression(
-                                    '=',
-                                    id,
-                                    node.object
-                                    ),
-                                prop
-                                )
-                            ,
-                            new js.Literal(null)
-                            ),
-                        pointer,
-                        undie
-                        );
+                    if (node.computed) {
+                        const [propHolder] = this.getOpvars(1);
+                        const pid = new js.Identifier(propHolder);
+                        changeNode(new js.MemberExpression(id, pid, true));
+                        pointer = new js.ConditionalExpression(
+                            new js.BinaryExpression(
+                                '!=',
+                                new js.MemberExpression(
+                                    new js.AssignmentExpression(
+                                        '=',
+                                        id,
+                                        node.object
+                                        ),
+                                    new js.AssignmentExpression('=', pid, prop),
+                                    true
+                                    )
+                                ,
+                                new js.Literal(null)
+                                ),
+                            pointer,
+                            undie
+                            );
+                    } else {
+                        changeNode(new js.MemberExpression(id, prop));
+                        pointer = new js.ConditionalExpression(
+                            new js.BinaryExpression(
+                                '!=',
+                                new js.MemberExpression(
+                                    new js.AssignmentExpression(
+                                        '=',
+                                        id,
+                                        node.object
+                                        ),
+                                    prop
+                                    )
+                                ,
+                                new js.Literal(null)
+                                ),
+                            pointer,
+                            undie
+                            );
+                    }
                     continue;
                 }
             }
