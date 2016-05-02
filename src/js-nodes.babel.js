@@ -516,6 +516,7 @@ export class AssignmentPattern extends Pattern {
 
 		this.left = left;
 		this.right = right;
+		this.operator = '=';
 	}
 }
 
