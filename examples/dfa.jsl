@@ -9,7 +9,7 @@ const dictionary = new Set([
 ])
 
 stateGen() -> {
-    var i = 0
+    var i = 1
     return () -> {
         return i then i += 1
     }
@@ -23,7 +23,7 @@ createDFA(wordSet) ->
     ,   statemap    = new Map() # maps strings to stateNumbers
     ,   nextState   = stateGen()
     ,   nullState   = nextState()
-    ,   startState  = stateNum('')
+    ,   startState  = 0
 
     nullMap() -> {
         const map = new Map()
