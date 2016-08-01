@@ -2,8 +2,10 @@
 import {parse} from 'bizubee-compiler'
 import {run} from 'bizubee-node'
 import {rollup} from 'rollup'
+import rollupNodeResolve from 'rollup-plugin-node-resolve'
 import rollupBizubee from 'rollup-plugin-bizubee'
-import fs from 'fs'
+import {resolve} from 'path'
+import {readFileSync} from 'fs'
 
 function stripExt(text) {
     if (text.endsWith(ext)) {
@@ -123,12 +125,36 @@ export function main(args) {
         }
         
         if (has(args, 'c')) {
-            const source = fs.readFileSync(get(args, 'c'), 'utf8');
+            const source = readFileSync(get(args, 'c'), 'utf8');
             console.log(parse(source));
             
             process.exit(0);
         }
         
+        if (has(args, 'b')) {
+            rollup({
+                plugins: [
+                    rollupBizubee({}),
+                    rollupNodeResolve({
+                        jsnext: true,
+                        main: false
+                    })
+                ],
+                exports: 'none',
+                format: 'iife',
+                entry: `${process.cwd()}/${normalize(get(args, 'b'))}`
+            })
+            .then(bundle => {
+                const {code} = bundle.generate();
+                console.log(code);
+
+                process.exit(0);
+            }, err => {
+                console.log(err);
+            });
+            return;
+        }
+
         if (has(args, 'v')) {
             const json = require('../package.json');
             console.log(json.version);

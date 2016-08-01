@@ -1,5 +1,4 @@
 # [Bizubee](https://bizubee.github.io)
-## The CLI for the world's most intense programming language!
 
 This is the bizubee command line tool. For other bizubee tools and libraries check out [bizubee.github.io/tools](https://bizubee.github.io/tools.html)
 

@@ -11,10 +11,10 @@
     "minimist": "^1.2.0",
     "node-string-pad": "0.0.4",
     "rollup-plugin-bizubee": "0.0.1",
+    "rollup-plugin-node-resolve": "^1.7.2",
     "tangler": "0.0.2"
   },
-  "devDependencies": {
-  },
+  "devDependencies": {},
   "scripts": {
     "test": "node test.js"
   },
