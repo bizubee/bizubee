@@ -1,0 +1,14 @@
+
+# function with both curly and indented blocks
+fibonacciGen() -> * {
+	var [a, b] = [0, 1]
+	while true do
+		yield a
+		[a, b] = [b, a + b]
+}
+
+for n in fibonacciGen() do
+	console.log(n)
+
+	if n > 10000 do
+		break

@@ -2,6 +2,21 @@
 
 This is the bizubee command line tool. For other bizubee tools and libraries check out [bizubee.github.io/tools](https://bizubee.github.io/tools.html)
 
+## Install
+
+### From Source
+```
+	$ git clone https://github.com/bizubee/bizubee
+	$ cd bizubee
+	$ npm install
+```
+
+### With Node Package Manager (NPM)
+```
+	$ npm install -g bizubee
+```
+
+
 ## Usage
 
 ```
